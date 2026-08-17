@@ -1,5 +1,5 @@
 {
-  "name": "trade-chart-ai",
+  "name": "tradelens-data",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "dukascopy-node": "^1.50.0",
     "lucide-react": "^0.468.0",
     "next": "^15.5.2",
     "react": "^19.1.1",

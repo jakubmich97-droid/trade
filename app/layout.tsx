@@ -2,9 +2,9 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "TradeLens AI | Analýza trading grafu",
+  title: "TradeLens Data | Automatická technická analýza",
   description:
-    "Nahraj screenshot grafu a získej strukturovaný technický scénář s risk managementem.",
+    "Bezplatná multi-timeframe analýza DE40, US100 a EURUSD z OHLC dat Dukascopy.",
   manifest: "/manifest.webmanifest",
   icons: { icon: "/icon.svg" },
 };

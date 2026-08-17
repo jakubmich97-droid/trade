@@ -1,7 +1,7 @@
 {
-  "name": "TradeLens AI",
+  "name": "TradeLens Data",
   "short_name": "TradeLens",
-  "description": "AI analýza screenshotu trading grafu",
+  "description": "Automatická multi-timeframe analýza OHLC dat",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#07100d",
