@@ -650,7 +650,7 @@ export function TradeAnalyzer() {
 
       <section className="journal-section">
         <div className="section-heading"><div><span>Neon databáze</span><h2>Obchodní deník</h2></div><small>{journal.length} obchodů · čas Europe/Prague</small></div>
-        <p className="journal-intro">Každý aktivní signál má uloženou open cenu a čas. U otevřeného obchodu doplň close cenu, čas a důvod ukončení; výsledek a R se dopočítají automaticky.</p>
+        <p className="journal-intro">Každý nový aktivní signál má uloženou open cenu, čas a objem v lotech. U otevřeného obchodu doplň close cenu, čas a důvod ukončení; výsledek a R se dopočítají automaticky.</p>
         {journalError && <div className="error-message journal-error"><AlertTriangle size={17} /><span>{journalError}</span></div>}
         <div className="journal-table-wrap">
           <table className="journal-table">

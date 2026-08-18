@@ -111,7 +111,11 @@ export async function persistAnalysis(input: AnalyzeRequest, analysis: TradeAnal
       'Automaticky vytvořený systémový obchod'
     )
     ON CONFLICT (analysis_id, mode)
-    DO UPDATE SET analysis_id = EXCLUDED.analysis_id
+    DO UPDATE SET
+      position_size = EXCLUDED.position_size,
+      risk_percent = EXCLUDED.risk_percent,
+      account_size_czk = EXCLUDED.account_size_czk,
+      risk_amount_czk = EXCLUDED.risk_amount_czk
     RETURNING id
   ` as StoredRow[];
 
