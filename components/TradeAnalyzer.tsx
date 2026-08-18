@@ -40,6 +40,31 @@ interface HistoryItem {
   analysis: TradeAnalysis;
 }
 
+interface PersistenceState {
+  stored: boolean;
+  analysisId: string | null;
+  paperTradeId: string | null;
+}
+
+interface PerformanceItem {
+  mode: "PAPER" | "LIVE";
+  instrument: string;
+  totalTrades: number;
+  openTrades: number;
+  wins: number;
+  losses: number;
+  breakeven: number;
+  winRatePercent: number | null;
+  expectancyR: number | null;
+  totalR: number | null;
+  profitFactor: number | null;
+}
+
+interface StatsState {
+  savedAnalyses: number;
+  performance: PerformanceItem[];
+}
+
 function verdictLabel(verdict: Verdict) {
   return verdict === "NO_TRADE" ? "NO TRADE" : verdict;
 }
@@ -68,6 +93,20 @@ export function TradeAnalyzer() {
   const [error, setError] = useState("");
   const [analysis, setAnalysis] = useState<TradeAnalysis | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [persistence, setPersistence] = useState<PersistenceState | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [confirmNotice, setConfirmNotice] = useState("");
+  const [stats, setStats] = useState<StatsState | null>(null);
+
+  async function loadStats() {
+    try {
+      const response = await fetch("/api/stats", { cache: "no-store" });
+      if (!response.ok) return;
+      setStats((await response.json()) as StatsState);
+    } catch {
+      // Analýza funguje i při dočasně nedostupných statistikách.
+    }
+  }
 
   useEffect(() => {
     try {
@@ -76,6 +115,7 @@ export function TradeAnalyzer() {
     } catch {
       window.localStorage.removeItem("tradelens-data-history");
     }
+    void loadStats();
   }, []);
 
   const estimatedRisk = useMemo(() => {
@@ -103,6 +143,8 @@ export function TradeAnalyzer() {
     setLoading(true);
     setError("");
     setAnalysis(null);
+    setPersistence(null);
+    setConfirmNotice("");
     try {
       const response = await fetch("/api/analyze", {
         method: "POST",
@@ -114,10 +156,12 @@ export function TradeAnalyzer() {
           accountSize: accountSize ? Number(accountSize) : null,
         }),
       });
-      const payload = (await response.json()) as { analysis?: TradeAnalysis; error?: string };
+      const payload = (await response.json()) as { analysis?: TradeAnalysis; persistence?: PersistenceState; error?: string };
       if (!response.ok || !payload.analysis) throw new Error(payload.error || "Analýzu se nepodařilo dokončit.");
       setAnalysis(payload.analysis);
+      setPersistence(payload.persistence ?? null);
       saveHistory(payload.analysis);
+      void loadStats();
       window.setTimeout(() => resultRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Analýza selhala.");
@@ -125,6 +169,40 @@ export function TradeAnalyzer() {
       setLoading(false);
     }
   }
+
+  async function confirmLiveTrade() {
+    if (!persistence?.analysisId) return;
+    setConfirming(true);
+    setConfirmNotice("");
+    try {
+      const response = await fetch("/api/trades/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ analysisId: persistence.analysisId }),
+      });
+      const payload = (await response.json()) as { saved?: boolean; error?: string };
+      if (!response.ok || !payload.saved) throw new Error(payload.error || "Obchod se nepodařilo uložit.");
+      setConfirmNotice("Reálný obchod je uložený jako LIVE. Opakované kliknutí nevytvoří duplicitu.");
+      void loadStats();
+    } catch (requestError) {
+      setConfirmNotice(requestError instanceof Error ? requestError.message : "Uložení obchodu selhalo.");
+    } finally {
+      setConfirming(false);
+    }
+  }
+
+  const aggregate = (mode: "PAPER" | "LIVE") => {
+    const rows = stats?.performance.filter((item) => item.mode === mode) ?? [];
+    const total = rows.reduce((sum, item) => sum + item.totalTrades, 0);
+    const open = rows.reduce((sum, item) => sum + item.openTrades, 0);
+    const wins = rows.reduce((sum, item) => sum + item.wins, 0);
+    const losses = rows.reduce((sum, item) => sum + item.losses, 0);
+    const decided = wins + losses;
+    return { total, open, wins, losses, winRate: decided ? wins / decided * 100 : null };
+  };
+
+  const paperStats = aggregate("PAPER");
+  const liveStats = aggregate("LIVE");
 
   return (
     <main className="app-shell">
@@ -138,7 +216,7 @@ export function TradeAnalyzer() {
         </a>
         <div className="topbar__meta">
           <span className="status"><i /> Datový feed připraven</span>
-          <span className="secure"><Database size={14} /> Dukascopy · bez API klíče</span>
+          <span className="secure"><Database size={14} /> Dukascopy + Neon · bez API klíče</span>
         </div>
       </header>
 
@@ -250,8 +328,19 @@ export function TradeAnalyzer() {
               <SetupField label="Stop-loss" value={analysis.setup.stop_loss} />
               <SetupField label="Take-profit 1" value={analysis.setup.take_profit_1} />
               <SetupField label="Take-profit 2" value={analysis.setup.take_profit_2} />
+              <SetupField label="Doporučená doba" value={analysis.setup.holding_period} accent={analysis.verdict !== "NO_TRADE"} />
               <div className="rr-row"><span>Risk / Reward</span><strong>{analysis.setup.risk_reward}</strong></div>
               <div className="invalidation"><AlertTriangle size={16} /><span><b>Invalidace:</b> {analysis.setup.invalidation}</span></div>
+              {analysis.verdict !== "NO_TRADE" && <div className="time-stop"><Clock3 size={16} /><span><b>Časový stop:</b> {analysis.setup.time_stop_rule}</span></div>}
+              {analysis.verdict !== "NO_TRADE" && (
+                <div className="trade-confirm">
+                  <div><Database size={16} /><span>{persistence?.stored ? "Signál i PAPER obchod jsou uložené v Neonu." : "Analýza proběhla, ale databázový zápis se nepodařil."}</span></div>
+                  <button type="button" onClick={confirmLiveTrade} disabled={confirming || !persistence?.analysisId}>
+                    {confirming ? <LoaderCircle className="spin" size={16} /> : <Check size={16} />} Vstoupil jsem
+                  </button>
+                  {confirmNotice && <p>{confirmNotice}</p>}
+                </div>
+              )}
             </div>
 
             <div className="result-card">
@@ -277,6 +366,28 @@ export function TradeAnalyzer() {
           <div className="disclaimer"><ShieldCheck size={15} />{analysis.disclaimer}</div>
         </section>
       )}
+
+      <section className="performance-section">
+        <div className="section-heading"><div><span>Neon databáze</span><h2>Výkonnost strategie</h2></div><small>{stats ? `${stats.savedAnalyses} uložených analýz` : "Načítám statistiky…"}</small></div>
+        <div className="performance-grid">
+          {[
+            ["PAPER", "Všechny systémové signály", paperStats],
+            ["LIVE", "Obchody potvrzené v XTB", liveStats],
+          ].map(([mode, description, values]) => {
+            const item = values as typeof paperStats;
+            return <div className="performance-card" key={mode as string}>
+              <div><strong>{mode as string}</strong><span>{description as string}</span></div>
+              <dl>
+                <div><dt>Obchody</dt><dd>{item.total}</dd></div>
+                <div><dt>Otevřené</dt><dd>{item.open}</dd></div>
+                <div><dt>W / L</dt><dd>{item.wins} / {item.losses}</dd></div>
+                <div><dt>Win rate</dt><dd>{item.winRate === null ? "—" : `${item.winRate.toFixed(1)} %`}</dd></div>
+              </dl>
+            </div>;
+          })}
+        </div>
+        <p className="performance-note">Win rate se začne počítat až po uzavření obchodů. PAPER a LIVE zůstávají oddělené, aby výsledek nezkresloval výběr jen některých signálů.</p>
+      </section>
 
       {history.length > 0 && (
         <section className="history-section">

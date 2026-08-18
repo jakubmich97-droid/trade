@@ -42,11 +42,19 @@ export interface TradeAnalysis {
   };
   setup: {
     entry_zone: string;
+    entry_price: number | null;
     stop_loss: string;
+    stop_loss_price: number | null;
     take_profit_1: string;
+    take_profit_1_price: number | null;
     take_profit_2: string;
+    take_profit_2_price: number | null;
     risk_reward: string;
     invalidation: string;
+    holding_period: string;
+    holding_period_min_minutes: number | null;
+    holding_period_max_minutes: number | null;
+    time_stop_rule: string;
   };
   reasons: string[];
   risks: string[];
@@ -58,6 +66,7 @@ export interface TradeAnalysis {
     source_price: number;
     xtb_price: number | null;
     price_offset: number;
+    total_score: number;
   };
 }
 
@@ -219,6 +228,12 @@ export function buildTradeAnalysis(request: AnalyzeRequest, market: Record<Analy
   const direction = verdict === "SHORT" ? -1 : 1;
   const tp1 = entry + direction * riskDistance * 1.5;
   const tp2 = entry + direction * riskDistance * 2;
+  const estimatedM15Candles = Math.max(
+    3,
+    Math.min(12, Math.ceil(Math.abs(tp2 - entry) / Math.max(m15.atr14 * 0.55, Number.EPSILON))),
+  );
+  const holdingMin = Math.max(45, estimatedM15Candles * 15);
+  const holdingMax = Math.min(360, Math.max(holdingMin + 45, holdingMin * 2));
   const confidence = verdict === "NO_TRADE" ? Math.min(86, 52 + Math.max(0, 8 - Math.abs(totalScore)) * 4) : Math.min(90, 58 + Math.abs(totalScore) * 2);
   const deviation = xtbPrice === null ? 0 : Math.abs(priceOffset / sourcePrice) * 100;
   const offsetWarning = deviation > (request.instrument === "EURUSD" ? 0.2 : 0.5) ? `Zadaná cena XTB se od Dukascopy liší o ${deviation.toFixed(2)} %. Přesné úrovně proto ověř přímo v xStation.` : null;
@@ -230,18 +245,34 @@ export function buildTradeAnalysis(request: AnalyzeRequest, market: Record<Analy
   const reasons = snapshots.map((item) => `${item.timeframe}: ${item.notes.length ? item.notes.join(", ") : "signály nejsou dostatečně jednoznačné"} (skóre ${item.score > 0 ? "+" : ""}${item.score}).`);
   const setup = verdict === "NO_TRADE" ? {
     entry_zone: "Bez vstupu – timeframy nejsou ve stejné silné konfluenci",
+    entry_price: null,
     stop_loss: "Nestanovuje se",
+    stop_loss_price: null,
     take_profit_1: "Nestanovuje se",
+    take_profit_1_price: null,
     take_profit_2: "Nestanovuje se",
+    take_profit_2_price: null,
     risk_reward: "Obchod se neotevírá",
     invalidation: "Novou analýzu spusť až po uzavření další M5 svíčky.",
+    holding_period: "Nestanovuje se",
+    holding_period_min_minutes: null,
+    holding_period_max_minutes: null,
+    time_stop_rule: "Bez aktivního obchodu.",
   } : {
     entry_zone: formatPrice(request.instrument, entry),
+    entry_price: entry,
     stop_loss: formatPrice(request.instrument, stop),
+    stop_loss_price: stop,
     take_profit_1: formatPrice(request.instrument, tp1),
+    take_profit_1_price: tp1,
     take_profit_2: formatPrice(request.instrument, tp2),
+    take_profit_2_price: tp2,
     risk_reward: "TP1 1:1,5 · TP2 1:2",
     invalidation: verdict === "LONG" ? `M5 close pod ${formatPrice(request.instrument, stop)}` : `M5 close nad ${formatPrice(request.instrument, stop)}`,
+    holding_period: `${holdingMin}–${holdingMax} minut`,
+    holding_period_min_minutes: holdingMin,
+    holding_period_max_minutes: holdingMax,
+    time_stop_rule: `Pokud obchod do ${holdingMin} minut nedosáhne alespoň +0,5 R nebo se M15 uzavře proti směru, zvaž ukončení. Nedrž jej déle než ${holdingMax} minut bez nové analýzy.`,
   };
 
   return {
@@ -260,6 +291,6 @@ export function buildTradeAnalysis(request: AnalyzeRequest, market: Record<Analy
     ],
     next_step: verdict === "NO_TRADE" ? "Počkej na uzavření další M5 svíčky a spusť analýzu znovu. Nevstupuj jen proto, že je trh aktivní." : "Před vstupem zkontroluj spread a aktuální cenu v XTB. Pokud se cena vzdálila od entry o více než 0,3 ATR M5, obchod přeskoč.",
     disclaimer: "Jde o automatickou vzdělávací technickou analýzu historických OHLC dat, nikoli finanční doporučení ani garanci výsledku.",
-    data: { source: "Dukascopy", last_updated: new Date(m5.last.timestamp).toISOString(), source_price: sourcePrice, xtb_price: xtbPrice, price_offset: priceOffset },
+    data: { source: "Dukascopy", last_updated: new Date(m5.last.timestamp).toISOString(), source_price: sourcePrice, xtb_price: xtbPrice, price_offset: priceOffset, total_score: totalScore },
   };
 }

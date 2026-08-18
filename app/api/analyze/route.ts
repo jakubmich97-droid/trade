@@ -7,6 +7,7 @@ import {
   type InstrumentId,
   type MarketCandle,
 } from "@/lib/trade-analysis";
+import { persistAnalysis, type PersistenceResult } from "@/lib/trade-journal";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -101,7 +102,13 @@ export async function POST(request: Request) {
     };
     const market = await getMarket(input.instrument);
     const analysis = buildTradeAnalysis(input, market);
-    return NextResponse.json({ analysis });
+    let persistence: PersistenceResult = { stored: false, analysisId: null, paperTradeId: null };
+    try {
+      persistence = await persistAnalysis(input, analysis);
+    } catch (databaseError) {
+      console.error("Neon persistence error", databaseError);
+    }
+    return NextResponse.json({ analysis, persistence });
   } catch (error) {
     console.error("Dukascopy analysis error", error);
     return NextResponse.json(

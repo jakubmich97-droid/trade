@@ -17,7 +17,9 @@ Při každém spuštění se načte až 400 uzavřených svíček pro každý ti
 - M15 hledá obchodní setup
 - M5 potvrzuje vstupní trigger
 
-Pravidlový engine počítá EMA 20/50/200, RSI 14, ATR 14 a price action posledních svíček. LONG nebo SHORT vrátí pouze při silné shodě všech tří timeframe; jinak zůstává NO TRADE. Volitelná aktuální cena z XTB posune vypočtené vstupní a výstupní úrovně na XTB feed.
+Pravidlový engine počítá EMA 20/50/200, RSI 14, ATR 14 a price action posledních svíček. LONG nebo SHORT vrátí pouze při silné shodě všech tří timeframe; jinak zůstává NO TRADE. Volitelná aktuální cena z XTB posune vypočtené vstupní a výstupní úrovně na XTB feed. Aktivní signál obsahuje také odhad doporučené doby držení a časový stop odvozený z ATR na M15.
+
+Každá analýza se ukládá do Neon PostgreSQL. Aktivní LONG/SHORT zároveň vytvoří PAPER obchod a tlačítko „Vstoupil jsem“ uloží samostatný LIVE obchod potvrzený v XTB. Opakovaná analýza stejné uzavřené M5 svíčky nevytvoří duplicitu.
 
 ## Lokální spuštění
 
@@ -26,7 +28,7 @@ npm install
 npm run dev
 ```
 
-Nejsou potřeba žádné proměnné prostředí ani API klíče.
+Pro tržní data není potřeba API klíč. Pro ukládání statistik nastav proměnnou `DATABASE_URL` na Neon PostgreSQL connection string.
 
 ## Nasazení
 
