@@ -45,7 +45,6 @@ interface HistoryItem {
 interface PersistenceState {
   stored: boolean;
   analysisId: string | null;
-  paperTradeId: string | null;
 }
 
 interface PerformanceItem {
@@ -193,6 +192,7 @@ export function TradeAnalyzer() {
   const [persistence, setPersistence] = useState<PersistenceState | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [confirmNotice, setConfirmNotice] = useState("");
+  const [tradeDecision, setTradeDecision] = useState<"entered" | "skipped" | null>(null);
   const [stats, setStats] = useState<StatsState | null>(null);
   const [journal, setJournal] = useState<TradeJournalItem[]>([]);
   const [journalError, setJournalError] = useState("");
@@ -262,6 +262,7 @@ export function TradeAnalyzer() {
     setAnalysis(null);
     setPersistence(null);
     setConfirmNotice("");
+    setTradeDecision(null);
     try {
       const response = await fetch("/api/analyze", {
         method: "POST",
@@ -301,13 +302,19 @@ export function TradeAnalyzer() {
       });
       const payload = (await response.json()) as { saved?: boolean; error?: string };
       if (!response.ok || !payload.saved) throw new Error(payload.error || "Obchod se nepodařilo uložit.");
-      setConfirmNotice("Reálný obchod je uložený jako LIVE. Opakované kliknutí nevytvoří duplicitu.");
+      setTradeDecision("entered");
+      setConfirmNotice("Obchod je uložený v deníku. Opakované potvrzení nevytvoří duplicitu.");
       void Promise.all([loadStats(), loadJournal()]);
     } catch (requestError) {
       setConfirmNotice(requestError instanceof Error ? requestError.message : "Uložení obchodu selhalo.");
     } finally {
       setConfirming(false);
     }
+  }
+
+  function skipTrade() {
+    setTradeDecision("skipped");
+    setConfirmNotice("Do tohoto obchodu nevstupuješ, proto se do obchodního deníku nic nezapsalo.");
   }
 
   function closeFormFor(tradeId: string): CloseForm {
@@ -464,8 +471,8 @@ export function TradeAnalyzer() {
     }
   }
 
-  const aggregate = (mode: "PAPER" | "LIVE") => {
-    const rows = stats?.performance.filter((item) => item.mode === mode) ?? [];
+  const aggregate = () => {
+    const rows = stats?.performance ?? [];
     const total = rows.reduce((sum, item) => sum + item.totalTrades, 0);
     const open = rows.reduce((sum, item) => sum + item.openTrades, 0);
     const wins = rows.reduce((sum, item) => sum + item.wins, 0);
@@ -474,8 +481,7 @@ export function TradeAnalyzer() {
     return { total, open, wins, losses, winRate: decided ? wins / decided * 100 : null };
   };
 
-  const paperStats = aggregate("PAPER");
-  const liveStats = aggregate("LIVE");
+  const confirmedStats = aggregate();
 
   return (
     <main className="app-shell">
@@ -615,10 +621,15 @@ export function TradeAnalyzer() {
               {analysis.verdict !== "NO_TRADE" && <div className="time-stop"><Clock3 size={16} /><span><b>Časový stop:</b> {analysis.setup.time_stop_rule}</span></div>}
               {analysis.verdict !== "NO_TRADE" && (
                 <div className="trade-confirm">
-                  <div><Database size={16} /><span>{persistence?.stored ? "Signál i PAPER obchod jsou uložené v Neonu." : "Analýza proběhla, ale databázový zápis se nepodařil."}</span></div>
-                  <button type="button" onClick={confirmLiveTrade} disabled={confirming || !persistence?.analysisId}>
-                    {confirming ? <LoaderCircle className="spin" size={16} /> : <Check size={16} />} Vstoupil jsem
-                  </button>
+                  <div><Database size={16} /><span>{persistence?.stored ? "Analýza je uložená. Obchod se do deníku zapíše až po tvém potvrzení vstupu." : "Analýza proběhla, ale databázový zápis se nepodařil."}</span></div>
+                  <div className="trade-decision-buttons">
+                    <button type="button" className="trade-decision-enter" onClick={confirmLiveTrade} disabled={confirming || !persistence?.analysisId || tradeDecision === "entered"}>
+                      {confirming ? <LoaderCircle className="spin" size={16} /> : <Check size={16} />} {tradeDecision === "entered" ? "Obchod zapsán" : "Ano, vstupuji"}
+                    </button>
+                    <button type="button" className="trade-decision-skip" onClick={skipTrade} disabled={confirming || tradeDecision === "entered"}>
+                      <X size={16} /> Ne, obchod neberu
+                    </button>
+                  </div>
                   {confirmNotice && <p>{confirmNotice}</p>}
                 </div>
               )}
@@ -654,14 +665,13 @@ export function TradeAnalyzer() {
         {journalError && <div className="error-message journal-error"><AlertTriangle size={17} /><span>{journalError}</span></div>}
         <div className="journal-table-wrap">
           <table className="journal-table">
-            <thead><tr><th>Typ</th><th>Instrument</th><th>Směr</th><th>Open</th><th>Objem</th><th>Plán držení</th><th>Close</th><th>Výsledek</th><th>Akce</th></tr></thead>
+            <thead><tr><th>Instrument</th><th>Směr</th><th>Open</th><th>Objem</th><th>Plán držení</th><th>Close</th><th>Výsledek</th><th>Akce</th></tr></thead>
             <tbody>
-              {journal.length === 0 ? <tr><td className="journal-empty" colSpan={9}>Zatím tu není žádný LONG/SHORT obchod.</td></tr> : journal.map((trade) => {
+              {journal.length === 0 ? <tr><td className="journal-empty" colSpan={8}>Zatím tu není žádný potvrzený obchod.</td></tr> : journal.map((trade) => {
                 const closeForm = closeFormFor(trade.tradeId);
                 const editForm = editForms[trade.tradeId];
                 return <Fragment key={trade.tradeId}>
                   <tr>
-                    <td><span className={`mode-badge mode-badge--${trade.mode.toLowerCase()}`}>{trade.mode}</span></td>
                     <td><strong>{trade.instrument}</strong><small>{formatPragueTime(trade.openedAt)}</small></td>
                     <td><span className={`direction-badge direction-badge--${trade.direction.toLowerCase()}`}>{trade.direction}</span></td>
                     <td><strong>{formatJournalPrice(trade.instrument, trade.openPrice)}</strong><small>vstupní cena</small></td>
@@ -683,9 +693,9 @@ export function TradeAnalyzer() {
                       <button className="delete-trade-button" type="button" onClick={() => removeTrade(trade)} disabled={deletingTradeId === trade.tradeId} aria-label={`Odstranit ${trade.mode} ${trade.instrument}`} title="Odstranit položku z deníku">{deletingTradeId === trade.tradeId ? <LoaderCircle className="spin" size={14} /> : <Trash2 size={14} />}<span>Odstranit</span></button>
                     </div></td>
                   </tr>
-                  {editingTradeId === trade.tradeId && editForm && <tr className="journal-edit-row"><td colSpan={9}>
+                  {editingTradeId === trade.tradeId && editForm && <tr className="journal-edit-row"><td colSpan={8}>
                     <div className="journal-edit-panel">
-                      <div className="journal-edit-heading"><div><strong>Editace {trade.mode} {trade.direction} {trade.instrument}</strong><small>Instrument a směr zůstávají navázané na původní analýzu.</small></div></div>
+                      <div className="journal-edit-heading"><div><strong>Editace {trade.direction} {trade.instrument}</strong><small>Instrument a směr zůstávají navázané na původní analýzu.</small></div></div>
                       <div className="journal-edit-grid">
                         <label><span>Open čas</span><input type="datetime-local" value={editForm.openedAt} onChange={(event) => updateEditForm(trade.tradeId, { openedAt: event.target.value })} /></label>
                         <label><span>Open cena</span><input inputMode="decimal" value={editForm.openPrice} onChange={(event) => updateEditForm(trade.tradeId, { openPrice: event.target.value })} /></label>
@@ -712,11 +722,8 @@ export function TradeAnalyzer() {
       <section className="performance-section">
         <div className="section-heading"><div><span>Neon databáze</span><h2>Výkonnost strategie</h2></div><small>{stats ? `${stats.savedAnalyses} uložených analýz` : "Načítám statistiky…"}</small></div>
         <div className="performance-grid">
-          {[
-            ["PAPER", "Všechny systémové signály", paperStats],
-            ["LIVE", "Obchody potvrzené v XTB", liveStats],
-          ].map(([mode, description, values]) => {
-            const item = values as typeof paperStats;
+          {[["POTVRZENÉ OBCHODY", "Pouze obchody, do kterých jsi skutečně vstoupil", confirmedStats]].map(([mode, description, values]) => {
+            const item = values as typeof confirmedStats;
             return <div className="performance-card" key={mode as string}>
               <div><strong>{mode as string}</strong><span>{description as string}</span></div>
               <dl>
@@ -728,7 +735,7 @@ export function TradeAnalyzer() {
             </div>;
           })}
         </div>
-        <p className="performance-note">Win rate se začne počítat až po uzavření obchodů. PAPER a LIVE zůstávají oddělené, aby výsledek nezkresloval výběr jen některých signálů.</p>
+        <p className="performance-note">Win rate se začne počítat až po uzavření potvrzených obchodů. Samotná analýza už obchod ani výsledek nevytváří.</p>
       </section>
 
       {history.length > 0 && (

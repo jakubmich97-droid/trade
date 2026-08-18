@@ -40,7 +40,6 @@ interface StoredRow {
 export interface PersistenceResult {
   stored: boolean;
   analysisId: string | null;
-  paperTradeId: string | null;
 }
 
 function tradeLevels(analysis: TradeAnalysis) {
@@ -92,34 +91,7 @@ export async function persistAnalysis(input: AnalyzeRequest, analysis: TradeAnal
     RETURNING id
   ` as StoredRow[];
   const analysisId = rows[0].id;
-
-  if (analysis.verdict === "NO_TRADE") return { stored: true, analysisId, paperTradeId: null };
-
-  const levels = tradeLevels(analysis);
-  const riskAmount = input.accountSize ? input.accountSize * input.riskPercent / 100 : null;
-  const trades = await sql`
-    INSERT INTO trades (
-      analysis_id, mode, direction, opened_at, entry_price, stop_loss,
-      take_profit_1, take_profit_2, recommended_hold_min_minutes, recommended_hold_max_minutes,
-      position_size, risk_percent, account_size_czk, risk_amount_czk,
-      note
-    ) VALUES (
-      ${analysisId}, 'PAPER', ${analysis.verdict}, ${input.xtbPriceAt},
-      ${levels.entry}, ${levels.stop}, ${levels.tp1}, ${levels.tp2},
-      ${analysis.setup.holding_period_min_minutes}, ${analysis.setup.holding_period_max_minutes},
-      ${input.volume}, ${input.riskPercent}, ${input.accountSize}, ${riskAmount},
-      'Automaticky vytvořený systémový obchod'
-    )
-    ON CONFLICT (analysis_id, mode)
-    DO UPDATE SET
-      position_size = EXCLUDED.position_size,
-      risk_percent = EXCLUDED.risk_percent,
-      account_size_czk = EXCLUDED.account_size_czk,
-      risk_amount_czk = EXCLUDED.risk_amount_czk
-    RETURNING id
-  ` as StoredRow[];
-
-  return { stored: true, analysisId, paperTradeId: trades[0].id };
+  return { stored: true, analysisId };
 }
 
 export async function confirmLiveTrade(analysisId: string) {
@@ -147,10 +119,10 @@ export async function confirmLiveTrade(analysisId: string) {
       position_size, risk_percent, account_size_czk, risk_amount_czk,
       note
     ) VALUES (
-      ${analysisId}, 'LIVE', ${stored.verdict}, now(), ${levels.entry}, ${levels.stop},
+      ${analysisId}, 'LIVE', ${stored.verdict}, ${input.xtbPriceAt}, ${levels.entry}, ${levels.stop},
       ${levels.tp1}, ${levels.tp2}, ${analysis.setup.holding_period_min_minutes}, ${analysis.setup.holding_period_max_minutes},
       ${input.volume ?? null}, ${input.riskPercent}, ${input.accountSize}, ${riskAmount},
-      'Uživatel potvrdil vstup v XTB'
+      'Uživatel po zobrazení analýzy potvrdil vstup v XTB'
     )
     ON CONFLICT (analysis_id, mode)
     DO UPDATE SET analysis_id = EXCLUDED.analysis_id
@@ -205,6 +177,7 @@ export async function getTradeJournal(): Promise<TradeJournalItem[]> {
       journal.strategy_version
     FROM v_trade_journal AS journal
     JOIN trades AS source_trade ON source_trade.id = journal.trade_id
+    WHERE journal.mode = 'LIVE'
     ORDER BY journal.opened_at DESC
     LIMIT 100
   ` as JournalDatabaseRow[];

@@ -111,7 +111,7 @@ export async function POST(request: Request) {
     };
     const market = await getMarket(input.instrument);
     const analysis = buildTradeAnalysis(input, market);
-    let persistence: PersistenceResult = { stored: false, analysisId: null, paperTradeId: null };
+    let persistence: PersistenceResult = { stored: false, analysisId: null };
     try {
       persistence = await persistAnalysis(input, analysis);
     } catch (databaseError) {

@@ -19,9 +19,9 @@ Při každém spuštění se načte až 400 uzavřených svíček pro každý ti
 
 Pravidlový engine počítá EMA 20/50/200, RSI 14, ATR 14 a price action posledních svíček. LONG nebo SHORT vrátí pouze při silné shodě všech tří timeframe; jinak zůstává NO TRADE. Volitelná aktuální cena z XTB posune vypočtené vstupní a výstupní úrovně na XTB feed. Aktivní signál obsahuje také odhad doporučené doby držení a časový stop odvozený z ATR na M15.
 
-Každá analýza se ukládá do Neon PostgreSQL. Pro spuštění je povinná aktuální cena z XTB, její čas v pásmu Europe/Prague a objem obchodu v lotech. Aktivní LONG/SHORT zároveň vytvoří PAPER obchod a tlačítko „Vstoupil jsem“ uloží samostatný LIVE obchod potvrzený v XTB. Opakovaná analýza stejné uzavřené M5 svíčky nevytvoří duplicitu.
+Každá analýza se ukládá do Neon PostgreSQL. Pro spuštění je povinná aktuální cena z XTB, její čas v pásmu Europe/Prague a objem obchodu v lotech. Samotná analýza žádný obchod nevytvoří. Teprve po zobrazení výsledku uživatel potvrdí, zda do obchodu skutečně vstupuje; pouze potvrzený LONG/SHORT se uloží do obchodního deníku. Opakované potvrzení stejné analýzy nevytvoří duplicitu.
 
-Obchodní deník načítá data z pohledu `v_trade_journal` a z tabulky `trades`. U otevřeného obchodu lze ručně doplnit close cenu, čas a důvod ukončení. U každé položky lze opravit open čas a cenu, objem, SL, TP1 a TP2; u uzavřeného obchodu také close údaje. Databázový trigger následně určí WIN, LOSS nebo BREAKEVEN a vypočítá výsledek v R.
+Obchodní deník načítá pouze potvrzené obchody z pohledu `v_trade_journal` a z tabulky `trades`. Historické PAPER záznamy zůstávají bezpečně uložené v databázi, ale aplikace je nezobrazuje ani nezahrnuje do statistik. U otevřeného obchodu lze ručně doplnit close cenu, čas a důvod ukončení. U každé položky lze opravit open čas a cenu, objem, SL, TP1 a TP2; u uzavřeného obchodu také close údaje. Databázový trigger následně určí WIN, LOSS nebo BREAKEVEN a vypočítá výsledek v R.
 Jednotlivý obchod lze z deníku také trvale odstranit po potvrzení; související analýza zůstává zachovaná.
 
 ## Lokální spuštění

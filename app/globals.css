@@ -196,10 +196,14 @@ a { color: inherit; text-decoration: none; }
 .time-stop { margin-top: 10px; padding: 10px; display: flex; align-items: flex-start; gap: 8px; color: #afc8bd; font-size: 9px; line-height: 1.5; border: 1px solid rgba(106,169,255,.14); background: rgba(106,169,255,.045); border-radius: 9px; }
 .time-stop svg { color: var(--blue); flex: 0 0 auto; }
 .trade-confirm { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
-.trade-confirm > div { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 9px; line-height: 1.45; }
-.trade-confirm > div svg { color: var(--green); flex: 0 0 auto; }
-.trade-confirm button { margin-top: 10px; width: 100%; height: 38px; border: 1px solid rgba(66,245,164,.25); border-radius: 9px; background: rgba(66,245,164,.09); color: #caffea; font-size: 10px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 7px; }
-.trade-confirm button:hover:not(:disabled) { background: rgba(66,245,164,.14); }
+.trade-confirm > div:first-child { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 9px; line-height: 1.45; }
+.trade-confirm > div:first-child svg { color: var(--green); flex: 0 0 auto; }
+.trade-decision-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.trade-confirm button { width: 100%; height: 38px; border-radius: 9px; font-size: 10px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 7px; }
+.trade-decision-enter { border: 1px solid rgba(66,245,164,.25); background: rgba(66,245,164,.09); color: #caffea; }
+.trade-decision-enter:hover:not(:disabled) { background: rgba(66,245,164,.14); }
+.trade-decision-skip { border: 1px solid rgba(255,255,255,.09); background: rgba(255,255,255,.025); color: #9eb4aa; }
+.trade-decision-skip:hover:not(:disabled) { border-color: rgba(255,255,255,.16); background: rgba(255,255,255,.05); }
 .trade-confirm button:disabled { cursor: not-allowed; opacity: .45; }
 .trade-confirm p { margin: 9px 0 0; color: #a8c3b7; font-size: 9px; line-height: 1.45; }
 .indicator-list { display: flex; flex-direction: column; }
@@ -230,7 +234,7 @@ a { color: inherit; text-decoration: none; }
 .section-heading h2 { font: 700 18px "Manrope", sans-serif; margin: 4px 0 0; letter-spacing: -.03em; }
 .section-heading button { border: 0; background: none; color: #6e857a; display: flex; gap: 6px; align-items: center; cursor: pointer; font-size: 10px; }
 .section-heading > small { color: var(--muted); font-size: 10px; }
-.performance-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.performance-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
 .performance-card { border: 1px solid var(--line); background: rgba(3,13,9,.35); border-radius: 13px; padding: 15px; }
 .performance-card > div { display: flex; flex-direction: column; gap: 3px; }
 .performance-card > div strong { color: var(--green); font: 800 12px "Manrope", sans-serif; }
@@ -346,6 +350,7 @@ footer p { color: #587065; font-size: 10px; }
   .journal-section { padding: 18px; }
   .journal-section .section-heading { align-items: flex-start; gap: 12px; }
   .journal-section .section-heading > small { text-align: right; }
+  .trade-decision-buttons { grid-template-columns: 1fr; }
   .journal-edit-grid { grid-template-columns: 1fr; }
   .performance-card dl { grid-template-columns: 1fr 1fr; }
   .history-grid { grid-template-columns: 1fr; }

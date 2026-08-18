@@ -27,6 +27,7 @@ export async function GET() {
         SELECT mode, instrument, total_trades, open_trades, wins, losses, breakeven,
                win_rate_percent, expectancy_r, total_r, profit_factor
         FROM v_trade_performance
+        WHERE mode = 'LIVE'
         ORDER BY mode, instrument
       `,
     ]);
