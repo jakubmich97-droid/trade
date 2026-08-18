@@ -23,6 +23,7 @@ Každá analýza se ukládá do Neon PostgreSQL. Pro spuštění je povinná akt
 
 Obchodní deník načítá všechny dříve uložené obchody z pohledu `v_trade_journal` a z tabulky `trades`, aby zůstala zachovaná historická data. Nové obchody se ale vytvářejí výhradně po potvrzení vstupu uživatelem. U otevřeného obchodu lze ručně doplnit close cenu, čas a důvod ukončení. U každé položky lze opravit open čas a cenu, objem, SL, TP1 a TP2; u uzavřeného obchodu také close údaje. Databázový trigger následně určí WIN, LOSS nebo BREAKEVEN a vypočítá výsledek v R.
 Jednotlivý obchod lze z deníku také trvale odstranit po potvrzení; související analýza zůstává zachovaná.
+Tlačítko „Exportovat CSV“ stáhne až 10 000 obchodů přímo z Neonu v UTF-8 CSV vhodném pro český Excel i následnou datovou analýzu.
 
 ## Lokální spuštění
 

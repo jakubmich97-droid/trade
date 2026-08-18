@@ -163,8 +163,9 @@ function optionalNumber(value: string | number | null) {
   return value === null ? null : Number(value);
 }
 
-export async function getTradeJournal(): Promise<TradeJournalItem[]> {
+export async function getTradeJournal(limit = 100): Promise<TradeJournalItem[]> {
   const sql = getSql();
+  const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 10_000);
   const rows = await sql`
     SELECT
       journal.trade_id, journal.mode, journal.instrument, journal.direction, journal.status,
@@ -178,7 +179,7 @@ export async function getTradeJournal(): Promise<TradeJournalItem[]> {
     FROM v_trade_journal AS journal
     JOIN trades AS source_trade ON source_trade.id = journal.trade_id
     ORDER BY journal.opened_at DESC
-    LIMIT 100
+    LIMIT ${safeLimit}
   ` as JournalDatabaseRow[];
 
   return rows.map((row) => ({

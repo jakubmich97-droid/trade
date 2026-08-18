@@ -234,6 +234,10 @@ a { color: inherit; text-decoration: none; }
 .section-heading h2 { font: 700 18px "Manrope", sans-serif; margin: 4px 0 0; letter-spacing: -.03em; }
 .section-heading button { border: 0; background: none; color: #6e857a; display: flex; gap: 6px; align-items: center; cursor: pointer; font-size: 10px; }
 .section-heading > small { color: var(--muted); font-size: 10px; }
+.journal-heading-actions { display: flex; align-items: center; gap: 12px; }
+.journal-heading-actions small { color: var(--muted); font-size: 10px; }
+.journal-export-button { height: 34px; padding: 0 11px; border: 1px solid rgba(66,245,164,.22); border-radius: 9px; background: rgba(66,245,164,.075); color: #caffea; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 9px; font-weight: 700; white-space: nowrap; transition: .18s ease; }
+.journal-export-button:hover { border-color: rgba(66,245,164,.4); background: rgba(66,245,164,.13); }
 .performance-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
 .performance-card { border: 1px solid var(--line); background: rgba(3,13,9,.35); border-radius: 13px; padding: 15px; }
 .performance-card > div { display: flex; flex-direction: column; gap: 3px; }
@@ -349,7 +353,8 @@ footer p { color: #587065; font-size: 10px; }
   .performance-section { padding: 18px; }
   .journal-section { padding: 18px; }
   .journal-section .section-heading { align-items: flex-start; gap: 12px; }
-  .journal-section .section-heading > small { text-align: right; }
+  .journal-heading-actions { align-items: flex-end; flex-direction: column; gap: 7px; }
+  .journal-heading-actions small { text-align: right; }
   .trade-decision-buttons { grid-template-columns: 1fr; }
   .journal-edit-grid { grid-template-columns: 1fr; }
   .performance-card dl { grid-template-columns: 1fr 1fr; }
