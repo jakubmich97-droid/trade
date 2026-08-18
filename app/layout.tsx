@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "TradeLens Data | Automatická technická analýza",
   description:
-    "Bezplatná multi-timeframe analýza DE40, US100 a EURUSD z OHLC dat Dukascopy.",
+    "Bezplatná multi-timeframe analýza DE40, US100, US500 a EURUSD z OHLC dat Dukascopy.",
   manifest: "/manifest.webmanifest",
   icons: { icon: "/icon.svg" },
 };
