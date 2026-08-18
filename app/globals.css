@@ -85,7 +85,7 @@ a { color: inherit; text-decoration: none; }
 .quality-tip strong { font-size: 11px; color: #cbdcf8; }
 .quality-tip span { font-size: 10px; color: var(--muted); line-height: 1.45; }
 
-.instrument-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+.instrument-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
 .instrument-card { position: relative; min-height: 112px; border: 1px solid var(--line); background: rgba(2, 10, 7, .36); border-radius: 13px; padding: 14px; text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 5px; transition: .2s ease; }
 .instrument-card:hover { transform: translateY(-1px); border-color: rgba(66,245,164,.24); }
 .instrument-card > span { color: #6f887d; margin-bottom: 7px; }
