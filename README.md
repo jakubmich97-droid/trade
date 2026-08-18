@@ -22,6 +22,7 @@ Pravidlový engine počítá EMA 20/50/200, RSI 14, ATR 14 a price action posled
 Každá analýza se ukládá do Neon PostgreSQL. Pro spuštění je povinná aktuální cena z XTB a její čas v pásmu Europe/Prague. Aktivní LONG/SHORT zároveň vytvoří PAPER obchod a tlačítko „Vstoupil jsem“ uloží samostatný LIVE obchod potvrzený v XTB. Opakovaná analýza stejné uzavřené M5 svíčky nevytvoří duplicitu.
 
 Obchodní deník načítá data z pohledu `v_trade_journal`. U otevřeného obchodu lze ručně doplnit close cenu, čas a důvod ukončení. Databázový trigger následně určí WIN, LOSS nebo BREAKEVEN a vypočítá výsledek v R.
+Jednotlivý obchod lze z deníku také trvale odstranit po potvrzení; související analýza zůstává zachovaná.
 
 ## Lokální spuštění
 

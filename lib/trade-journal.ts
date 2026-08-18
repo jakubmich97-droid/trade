@@ -268,3 +268,15 @@ export async function closeTrade(input: {
 
   return { tradeId: trade.id, status: trade.status, resultR: optionalNumber(trade.result_r) };
 }
+
+export async function deleteTrade(tradeId: string) {
+  const sql = getSql();
+  const rows = await sql`
+    DELETE FROM trades
+    WHERE id = ${tradeId}
+    RETURNING id
+  ` as StoredRow[];
+
+  if (!rows[0]) throw new Error("Obchod nebyl nalezen nebo už byl odstraněn.");
+  return rows[0].id;
+}

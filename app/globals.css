@@ -262,6 +262,9 @@ a { color: inherit; text-decoration: none; }
 .close-editor input:focus, .close-editor select:focus { border-color: rgba(66,245,164,.4); }
 .close-editor button { height: 34px; padding: 0 11px; border: 1px solid rgba(66,245,164,.23); background: rgba(66,245,164,.09); color: #caffea; border-radius: 8px; display: inline-flex; align-items: center; gap: 5px; justify-content: center; cursor: pointer; font-size: 9px; font-weight: 700; }
 .close-editor button:disabled { opacity: .5; cursor: wait; }
+.delete-trade-button { height: 34px; padding: 0 10px; border: 1px solid rgba(255,107,120,.18); background: rgba(255,107,120,.055); color: #ff9da6; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; font-size: 9px; font-weight: 700; }
+.delete-trade-button:hover:not(:disabled) { border-color: rgba(255,107,120,.35); background: rgba(255,107,120,.1); }
+.delete-trade-button:disabled { opacity: .5; cursor: wait; }
 .history-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .history-card { text-align: left; border: 1px solid var(--line); background: rgba(3, 13, 9, .35); border-radius: 12px; padding: 13px; cursor: pointer; transition: .18s ease; }
 .history-card:hover { transform: translateY(-1px); border-color: rgba(66,245,164,.22); }

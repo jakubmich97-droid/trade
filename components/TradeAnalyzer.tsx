@@ -17,6 +17,7 @@ import {
   RotateCcw,
   ShieldCheck,
   Target,
+  Trash2,
   TrendingUp,
   X,
   Zap,
@@ -173,6 +174,7 @@ export function TradeAnalyzer() {
   const [journal, setJournal] = useState<TradeJournalItem[]>([]);
   const [journalError, setJournalError] = useState("");
   const [closingTradeId, setClosingTradeId] = useState<string | null>(null);
+  const [deletingTradeId, setDeletingTradeId] = useState<string | null>(null);
   const [closeForms, setCloseForms] = useState<Record<string, CloseForm>>({});
 
   async function loadStats() {
@@ -327,6 +329,26 @@ export function TradeAnalyzer() {
       setJournalError(requestError instanceof Error ? requestError.message : "Obchod se nepodařilo uzavřít.");
     } finally {
       setClosingTradeId(null);
+    }
+  }
+
+  async function removeTrade(trade: TradeJournalItem) {
+    const confirmed = window.confirm(
+      `Opravdu odstranit ${trade.mode} ${trade.direction} ${trade.instrument} z obchodního deníku? Tuto akci nelze vrátit zpět.`,
+    );
+    if (!confirmed) return;
+
+    setDeletingTradeId(trade.tradeId);
+    setJournalError("");
+    try {
+      const response = await fetch(`/api/trades/${trade.tradeId}`, { method: "DELETE" });
+      const payload = (await response.json()) as { deleted?: boolean; error?: string };
+      if (!response.ok || !payload.deleted) throw new Error(payload.error || "Obchod se nepodařilo odstranit.");
+      await Promise.all([loadJournal(), loadStats()]);
+    } catch (requestError) {
+      setJournalError(requestError instanceof Error ? requestError.message : "Obchod se nepodařilo odstranit.");
+    } finally {
+      setDeletingTradeId(null);
     }
   }
 
@@ -516,9 +538,9 @@ export function TradeAnalyzer() {
         {journalError && <div className="error-message journal-error"><AlertTriangle size={17} /><span>{journalError}</span></div>}
         <div className="journal-table-wrap">
           <table className="journal-table">
-            <thead><tr><th>Typ</th><th>Instrument</th><th>Směr</th><th>Open</th><th>Plán držení</th><th>Close</th><th>Výsledek</th></tr></thead>
+            <thead><tr><th>Typ</th><th>Instrument</th><th>Směr</th><th>Open</th><th>Plán držení</th><th>Close</th><th>Výsledek</th><th>Akce</th></tr></thead>
             <tbody>
-              {journal.length === 0 ? <tr><td className="journal-empty" colSpan={7}>Zatím tu není žádný LONG/SHORT obchod.</td></tr> : journal.map((trade) => {
+              {journal.length === 0 ? <tr><td className="journal-empty" colSpan={8}>Zatím tu není žádný LONG/SHORT obchod.</td></tr> : journal.map((trade) => {
                 const closeForm = closeFormFor(trade.tradeId);
                 return <tr key={trade.tradeId}>
                   <td><span className={`mode-badge mode-badge--${trade.mode.toLowerCase()}`}>{trade.mode}</span></td>
@@ -537,6 +559,7 @@ export function TradeAnalyzer() {
                     </div> : <><strong>{trade.closePrice === null ? "—" : formatJournalPrice(trade.instrument, trade.closePrice)}</strong><small>{trade.closedAt ? formatPragueTime(trade.closedAt) : trade.exitReason}</small></>}
                   </td>
                   <td><span className={`result-badge result-badge--${trade.status.toLowerCase()}`}>{trade.status}</span>{trade.resultR !== null && <small>{trade.resultR > 0 ? "+" : ""}{trade.resultR.toFixed(2)} R · {trade.resultPercent?.toFixed(2)} %</small>}</td>
+                  <td><button className="delete-trade-button" type="button" onClick={() => removeTrade(trade)} disabled={deletingTradeId === trade.tradeId} aria-label={`Odstranit ${trade.mode} ${trade.instrument}`} title="Odstranit položku z deníku">{deletingTradeId === trade.tradeId ? <LoaderCircle className="spin" size={14} /> : <Trash2 size={14} />}<span>Odstranit</span></button></td>
                 </tr>;
               })}
             </tbody>
