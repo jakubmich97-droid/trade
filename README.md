@@ -6,6 +6,7 @@ Bezplatná webová aplikace pro automatickou technickou analýzu OHLCV dat. Nepo
 
 - DE40 / Germany 40 (`deuidxeur`)
 - US100 / Nasdaq 100 (`usatechidxusd`)
+- US500 / S&P 500 (`usa500idxusd`)
 - EUR/USD (`eurusd`)
 
 ## Princip analýzy
