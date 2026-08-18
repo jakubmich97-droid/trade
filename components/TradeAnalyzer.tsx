@@ -27,6 +27,7 @@ import type { InstrumentId, Signal, TradeAnalysis, Verdict } from "@/lib/trade-a
 const INSTRUMENTS: Array<{ id: InstrumentId; name: string; description: string }> = [
   { id: "DE40", name: "DE40", description: "Germany 40 / DAX" },
   { id: "US100", name: "US100", description: "Nasdaq 100 / US Tech" },
+  { id: "US500", name: "US500", description: "S&P 500 / US Large Cap" },
   { id: "EURUSD", name: "EUR/USD", description: "Euro / US Dollar" },
 ];
 
