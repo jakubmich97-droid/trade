@@ -14,6 +14,7 @@ export const maxDuration = 60;
 const INSTRUMENTS = {
   DE40: "deuidxeur",
   US100: "usatechidxusd",
+  US500: "usa500idxusd",
   EURUSD: "eurusd",
 } as const;
 
