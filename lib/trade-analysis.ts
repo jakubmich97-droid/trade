@@ -75,6 +75,7 @@ export interface AnalyzeRequest {
   instrument: InstrumentId;
   xtbPrice: number;
   xtbPriceAt: string;
+  volume: number;
   riskPercent: number;
   accountSize: number | null;
 }

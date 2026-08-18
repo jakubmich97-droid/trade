@@ -13,6 +13,7 @@ import {
   Database,
   Gauge,
   LoaderCircle,
+  Pencil,
   RefreshCw,
   RotateCcw,
   ShieldCheck,
@@ -22,7 +23,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { InstrumentId, Signal, TradeAnalysis, Verdict } from "@/lib/trade-analysis";
 
 const INSTRUMENTS: Array<{ id: InstrumentId; name: string; description: string }> = [
@@ -74,6 +75,10 @@ interface TradeJournalItem {
   status: "OPEN" | "WIN" | "LOSS" | "BREAKEVEN" | "CANCELLED" | "AMBIGUOUS";
   openedAt: string;
   openPrice: number;
+  volume: number | null;
+  stopLoss: number;
+  takeProfit1: number;
+  takeProfit2: number;
   recommendedHoldMinMinutes: number | null;
   recommendedHoldMaxMinutes: number | null;
   closedAt: string | null;
@@ -89,6 +94,18 @@ interface CloseForm {
   closePrice: string;
   closedAt: string;
   exitReason: "TP1" | "TP2" | "SL" | "BE" | "TIME_STOP" | "MANUAL";
+}
+
+interface EditForm {
+  openedAt: string;
+  openPrice: string;
+  volume: string;
+  stopLoss: string;
+  takeProfit1: string;
+  takeProfit2: string;
+  closedAt: string;
+  closePrice: string;
+  exitReason: CloseForm["exitReason"];
 }
 
 const PRAGUE_TIME_FORMATTER = new Intl.DateTimeFormat("en-CA", {
@@ -108,6 +125,11 @@ function pragueParts(date: Date) {
 
 function pragueNowInput(date = new Date()) {
   const parts = pragueParts(date);
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+
+function pragueIsoToInput(value: string) {
+  const parts = pragueParts(new Date(value));
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
 }
 
@@ -161,6 +183,7 @@ export function TradeAnalyzer() {
   const [instrument, setInstrument] = useState<InstrumentId>("DE40");
   const [xtbPrice, setXtbPrice] = useState("");
   const [xtbPriceAt, setXtbPriceAt] = useState(() => pragueNowInput());
+  const [volume, setVolume] = useState("");
   const [riskPercent, setRiskPercent] = useState(1);
   const [accountSize, setAccountSize] = useState("");
   const [loading, setLoading] = useState(false);
@@ -175,7 +198,10 @@ export function TradeAnalyzer() {
   const [journalError, setJournalError] = useState("");
   const [closingTradeId, setClosingTradeId] = useState<string | null>(null);
   const [deletingTradeId, setDeletingTradeId] = useState<string | null>(null);
+  const [editingTradeId, setEditingTradeId] = useState<string | null>(null);
+  const [savingTradeId, setSavingTradeId] = useState<string | null>(null);
   const [closeForms, setCloseForms] = useState<Record<string, CloseForm>>({});
+  const [editForms, setEditForms] = useState<Record<string, EditForm>>({});
 
   async function loadStats() {
     try {
@@ -244,6 +270,7 @@ export function TradeAnalyzer() {
           instrument,
           xtbPrice: parseLocalizedNumber(xtbPrice),
           xtbPriceAt: pragueInputToIso(xtbPriceAt),
+          volume: parseLocalizedNumber(volume),
           riskPercent,
           accountSize: accountSize ? Number(accountSize) : null,
         }),
@@ -352,6 +379,91 @@ export function TradeAnalyzer() {
     }
   }
 
+  function startEditing(trade: TradeJournalItem) {
+    setEditForms((current) => ({
+      ...current,
+      [trade.tradeId]: {
+        openedAt: pragueIsoToInput(trade.openedAt),
+        openPrice: String(trade.openPrice),
+        volume: trade.volume === null ? "" : String(trade.volume),
+        stopLoss: String(trade.stopLoss),
+        takeProfit1: String(trade.takeProfit1),
+        takeProfit2: String(trade.takeProfit2),
+        closedAt: trade.closedAt ? pragueIsoToInput(trade.closedAt) : "",
+        closePrice: trade.closePrice === null ? "" : String(trade.closePrice),
+        exitReason: (trade.exitReason as EditForm["exitReason"] | null) ?? "MANUAL",
+      },
+    }));
+    setEditingTradeId(trade.tradeId);
+    setJournalError("");
+  }
+
+  function updateEditForm(tradeId: string, update: Partial<EditForm>) {
+    setEditForms((current) => ({
+      ...current,
+      [tradeId]: { ...current[tradeId], ...update },
+    }));
+  }
+
+  async function saveTradeEdit(trade: TradeJournalItem) {
+    const form = editForms[trade.tradeId];
+    if (!form) return;
+    const openPrice = parseLocalizedNumber(form.openPrice);
+    const parsedVolume = parseLocalizedNumber(form.volume);
+    const stopLoss = parseLocalizedNumber(form.stopLoss);
+    const takeProfit1 = parseLocalizedNumber(form.takeProfit1);
+    const takeProfit2 = parseLocalizedNumber(form.takeProfit2);
+    if ([openPrice, parsedVolume, stopLoss, takeProfit1, takeProfit2].some((value) => !Number.isFinite(value) || value <= 0)) {
+      setJournalError("Open cena, objem, SL, TP1 a TP2 musí být kladná čísla.");
+      return;
+    }
+    if (parsedVolume > 1000) {
+      setJournalError("Objem nesmí být vyšší než 1 000 lotů.");
+      return;
+    }
+
+    let closedAt: string | null = null;
+    let closePrice: number | null = null;
+    let exitReason: EditForm["exitReason"] | null = null;
+    if (trade.status !== "OPEN") {
+      closePrice = parseLocalizedNumber(form.closePrice);
+      if (!form.closedAt || !Number.isFinite(closePrice) || closePrice <= 0) {
+        setJournalError("U uzavřeného obchodu musí zůstat vyplněný close čas a kladná close cena.");
+        return;
+      }
+      closedAt = pragueInputToIso(form.closedAt);
+      exitReason = form.exitReason;
+    }
+
+    setSavingTradeId(trade.tradeId);
+    setJournalError("");
+    try {
+      const response = await fetch(`/api/trades/${trade.tradeId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          openedAt: pragueInputToIso(form.openedAt),
+          openPrice,
+          volume: parsedVolume,
+          stopLoss,
+          takeProfit1,
+          takeProfit2,
+          closedAt,
+          closePrice,
+          exitReason,
+        }),
+      });
+      const payload = (await response.json()) as { saved?: boolean; error?: string };
+      if (!response.ok || !payload.saved) throw new Error(payload.error || "Změny se nepodařilo uložit.");
+      setEditingTradeId(null);
+      await Promise.all([loadJournal(), loadStats()]);
+    } catch (requestError) {
+      setJournalError(requestError instanceof Error ? requestError.message : "Změny se nepodařilo uložit.");
+    } finally {
+      setSavingTradeId(null);
+    }
+  }
+
   const aggregate = (mode: "PAPER" | "LIVE") => {
     const rows = stats?.performance.filter((item) => item.mode === mode) ?? [];
     const total = rows.reduce((sum, item) => sum + item.totalTrades, 0);
@@ -438,6 +550,10 @@ export function TradeAnalyzer() {
               <div className="datetime-wrap"><Clock3 size={17} /><input required type="datetime-local" value={xtbPriceAt} onChange={(event) => setXtbPriceAt(event.target.value)} /><button type="button" onClick={() => setXtbPriceAt(pragueNowInput())}>Nyní</button></div>
             </label>
             <label className="field">
+              <span>Objem obchodu <em>povinné</em></span>
+              <div className="suffix-input"><input required inputMode="decimal" value={volume} onChange={(event) => setVolume(event.target.value)} placeholder="např. 0,1" /><b>lot</b></div>
+            </label>
+            <label className="field">
               <span>Riziko na obchod</span>
               <div className="suffix-input"><input type="number" min="0.1" max="5" step="0.1" value={riskPercent} onChange={(event) => setRiskPercent(Number(event.target.value))} /><b>%</b></div>
             </label>
@@ -459,7 +575,7 @@ export function TradeAnalyzer() {
           </div>
 
           {error && <div className="error-message"><AlertTriangle size={17} /><span>{error}</span></div>}
-          <button className="analyze-button" type="button" onClick={analyze} disabled={loading || !xtbPrice.trim() || !xtbPriceAt}>
+          <button className="analyze-button" type="button" onClick={analyze} disabled={loading || !xtbPrice.trim() || !xtbPriceAt || !volume.trim()}>
             {loading ? <><LoaderCircle className="spin" size={19} /> Stahuji a počítám 1 200 svíček…</> : <><Zap size={19} /> Načíst data a analyzovat <ArrowRight size={18} /></>}
           </button>
           <p className="button-note"><RefreshCw size={13} /> Data se při opakování obnoví nejvýše jednou za minutu.</p>
@@ -538,29 +654,55 @@ export function TradeAnalyzer() {
         {journalError && <div className="error-message journal-error"><AlertTriangle size={17} /><span>{journalError}</span></div>}
         <div className="journal-table-wrap">
           <table className="journal-table">
-            <thead><tr><th>Typ</th><th>Instrument</th><th>Směr</th><th>Open</th><th>Plán držení</th><th>Close</th><th>Výsledek</th><th>Akce</th></tr></thead>
+            <thead><tr><th>Typ</th><th>Instrument</th><th>Směr</th><th>Open</th><th>Objem</th><th>Plán držení</th><th>Close</th><th>Výsledek</th><th>Akce</th></tr></thead>
             <tbody>
-              {journal.length === 0 ? <tr><td className="journal-empty" colSpan={8}>Zatím tu není žádný LONG/SHORT obchod.</td></tr> : journal.map((trade) => {
+              {journal.length === 0 ? <tr><td className="journal-empty" colSpan={9}>Zatím tu není žádný LONG/SHORT obchod.</td></tr> : journal.map((trade) => {
                 const closeForm = closeFormFor(trade.tradeId);
-                return <tr key={trade.tradeId}>
-                  <td><span className={`mode-badge mode-badge--${trade.mode.toLowerCase()}`}>{trade.mode}</span></td>
-                  <td><strong>{trade.instrument}</strong><small>{formatPragueTime(trade.openedAt)}</small></td>
-                  <td><span className={`direction-badge direction-badge--${trade.direction.toLowerCase()}`}>{trade.direction}</span></td>
-                  <td><strong>{formatJournalPrice(trade.instrument, trade.openPrice)}</strong><small>vstupní cena</small></td>
-                  <td>{trade.recommendedHoldMinMinutes && trade.recommendedHoldMaxMinutes ? <><strong>{trade.recommendedHoldMinMinutes}–{trade.recommendedHoldMaxMinutes} min</strong><small>doporučení</small></> : <span>—</span>}</td>
-                  <td className="journal-close-cell">
-                    {trade.status === "OPEN" ? <div className="close-editor">
-                      <input aria-label={`Close cena ${trade.instrument}`} inputMode="decimal" placeholder="Close cena" value={closeForm.closePrice} onChange={(event) => updateCloseForm(trade.tradeId, { closePrice: event.target.value })} />
-                      <input aria-label={`Close čas ${trade.instrument}`} type="datetime-local" value={closeForm.closedAt} onChange={(event) => updateCloseForm(trade.tradeId, { closedAt: event.target.value })} />
-                      <select aria-label={`Důvod ukončení ${trade.instrument}`} value={closeForm.exitReason} onChange={(event) => updateCloseForm(trade.tradeId, { exitReason: event.target.value as CloseForm["exitReason"] })}>
-                        <option value="MANUAL">Ruční ukončení</option><option value="TP1">TP1</option><option value="TP2">TP2</option><option value="SL">Stop-loss</option><option value="BE">Break-even</option><option value="TIME_STOP">Časový stop</option>
-                      </select>
-                      <button type="button" onClick={() => submitClose(trade)} disabled={closingTradeId === trade.tradeId}>{closingTradeId === trade.tradeId ? <LoaderCircle className="spin" size={14} /> : <Check size={14} />} Uzavřít</button>
-                    </div> : <><strong>{trade.closePrice === null ? "—" : formatJournalPrice(trade.instrument, trade.closePrice)}</strong><small>{trade.closedAt ? formatPragueTime(trade.closedAt) : trade.exitReason}</small></>}
-                  </td>
-                  <td><span className={`result-badge result-badge--${trade.status.toLowerCase()}`}>{trade.status}</span>{trade.resultR !== null && <small>{trade.resultR > 0 ? "+" : ""}{trade.resultR.toFixed(2)} R · {trade.resultPercent?.toFixed(2)} %</small>}</td>
-                  <td><button className="delete-trade-button" type="button" onClick={() => removeTrade(trade)} disabled={deletingTradeId === trade.tradeId} aria-label={`Odstranit ${trade.mode} ${trade.instrument}`} title="Odstranit položku z deníku">{deletingTradeId === trade.tradeId ? <LoaderCircle className="spin" size={14} /> : <Trash2 size={14} />}<span>Odstranit</span></button></td>
-                </tr>;
+                const editForm = editForms[trade.tradeId];
+                return <Fragment key={trade.tradeId}>
+                  <tr>
+                    <td><span className={`mode-badge mode-badge--${trade.mode.toLowerCase()}`}>{trade.mode}</span></td>
+                    <td><strong>{trade.instrument}</strong><small>{formatPragueTime(trade.openedAt)}</small></td>
+                    <td><span className={`direction-badge direction-badge--${trade.direction.toLowerCase()}`}>{trade.direction}</span></td>
+                    <td><strong>{formatJournalPrice(trade.instrument, trade.openPrice)}</strong><small>vstupní cena</small></td>
+                    <td><strong>{trade.volume === null ? "—" : trade.volume.toLocaleString("cs-CZ", { maximumFractionDigits: 4 })}</strong><small>{trade.volume === null ? "nezadáno" : "lot"}</small></td>
+                    <td>{trade.recommendedHoldMinMinutes && trade.recommendedHoldMaxMinutes ? <><strong>{trade.recommendedHoldMinMinutes}–{trade.recommendedHoldMaxMinutes} min</strong><small>doporučení</small></> : <span>—</span>}</td>
+                    <td className="journal-close-cell">
+                      {trade.status === "OPEN" ? <div className="close-editor">
+                        <input aria-label={`Close cena ${trade.instrument}`} inputMode="decimal" placeholder="Close cena" value={closeForm.closePrice} onChange={(event) => updateCloseForm(trade.tradeId, { closePrice: event.target.value })} />
+                        <input aria-label={`Close čas ${trade.instrument}`} type="datetime-local" value={closeForm.closedAt} onChange={(event) => updateCloseForm(trade.tradeId, { closedAt: event.target.value })} />
+                        <select aria-label={`Důvod ukončení ${trade.instrument}`} value={closeForm.exitReason} onChange={(event) => updateCloseForm(trade.tradeId, { exitReason: event.target.value as CloseForm["exitReason"] })}>
+                          <option value="MANUAL">Ruční ukončení</option><option value="TP1">TP1</option><option value="TP2">TP2</option><option value="SL">Stop-loss</option><option value="BE">Break-even</option><option value="TIME_STOP">Časový stop</option>
+                        </select>
+                        <button type="button" onClick={() => submitClose(trade)} disabled={closingTradeId === trade.tradeId}>{closingTradeId === trade.tradeId ? <LoaderCircle className="spin" size={14} /> : <Check size={14} />} Uzavřít</button>
+                      </div> : <><strong>{trade.closePrice === null ? "—" : formatJournalPrice(trade.instrument, trade.closePrice)}</strong><small>{trade.closedAt ? formatPragueTime(trade.closedAt) : trade.exitReason}</small></>}
+                    </td>
+                    <td><span className={`result-badge result-badge--${trade.status.toLowerCase()}`}>{trade.status}</span>{trade.resultR !== null && <small>{trade.resultR > 0 ? "+" : ""}{trade.resultR.toFixed(2)} R · {trade.resultPercent?.toFixed(2)} %</small>}</td>
+                    <td><div className="action-buttons">
+                      <button className="edit-trade-button" type="button" onClick={() => editingTradeId === trade.tradeId ? setEditingTradeId(null) : startEditing(trade)} aria-label={`Editovat ${trade.mode} ${trade.instrument}`} title="Editovat položku v deníku"><Pencil size={14} /><span>Editovat</span></button>
+                      <button className="delete-trade-button" type="button" onClick={() => removeTrade(trade)} disabled={deletingTradeId === trade.tradeId} aria-label={`Odstranit ${trade.mode} ${trade.instrument}`} title="Odstranit položku z deníku">{deletingTradeId === trade.tradeId ? <LoaderCircle className="spin" size={14} /> : <Trash2 size={14} />}<span>Odstranit</span></button>
+                    </div></td>
+                  </tr>
+                  {editingTradeId === trade.tradeId && editForm && <tr className="journal-edit-row"><td colSpan={9}>
+                    <div className="journal-edit-panel">
+                      <div className="journal-edit-heading"><div><strong>Editace {trade.mode} {trade.direction} {trade.instrument}</strong><small>Instrument a směr zůstávají navázané na původní analýzu.</small></div></div>
+                      <div className="journal-edit-grid">
+                        <label><span>Open čas</span><input type="datetime-local" value={editForm.openedAt} onChange={(event) => updateEditForm(trade.tradeId, { openedAt: event.target.value })} /></label>
+                        <label><span>Open cena</span><input inputMode="decimal" value={editForm.openPrice} onChange={(event) => updateEditForm(trade.tradeId, { openPrice: event.target.value })} /></label>
+                        <label><span>Objem (lot)</span><input inputMode="decimal" value={editForm.volume} onChange={(event) => updateEditForm(trade.tradeId, { volume: event.target.value })} placeholder="např. 0,1" /></label>
+                        <label><span>Stop-loss</span><input inputMode="decimal" value={editForm.stopLoss} onChange={(event) => updateEditForm(trade.tradeId, { stopLoss: event.target.value })} /></label>
+                        <label><span>Take-profit 1</span><input inputMode="decimal" value={editForm.takeProfit1} onChange={(event) => updateEditForm(trade.tradeId, { takeProfit1: event.target.value })} /></label>
+                        <label><span>Take-profit 2</span><input inputMode="decimal" value={editForm.takeProfit2} onChange={(event) => updateEditForm(trade.tradeId, { takeProfit2: event.target.value })} /></label>
+                        {trade.status !== "OPEN" && <>
+                          <label><span>Close čas</span><input type="datetime-local" value={editForm.closedAt} onChange={(event) => updateEditForm(trade.tradeId, { closedAt: event.target.value })} /></label>
+                          <label><span>Close cena</span><input inputMode="decimal" value={editForm.closePrice} onChange={(event) => updateEditForm(trade.tradeId, { closePrice: event.target.value })} /></label>
+                          <label><span>Důvod ukončení</span><select value={editForm.exitReason} onChange={(event) => updateEditForm(trade.tradeId, { exitReason: event.target.value as EditForm["exitReason"] })}><option value="MANUAL">Ruční ukončení</option><option value="TP1">TP1</option><option value="TP2">TP2</option><option value="SL">Stop-loss</option><option value="BE">Break-even</option><option value="TIME_STOP">Časový stop</option></select></label>
+                        </>}
+                      </div>
+                      <div className="journal-edit-actions"><button type="button" className="journal-edit-save" onClick={() => saveTradeEdit(trade)} disabled={savingTradeId === trade.tradeId}>{savingTradeId === trade.tradeId ? <LoaderCircle className="spin" size={14} /> : <Check size={14} />} Uložit změny</button><button type="button" className="journal-edit-cancel" onClick={() => setEditingTradeId(null)}>Zrušit</button></div>
+                    </div>
+                  </td></tr>}
+                </Fragment>;
               })}
             </tbody>
           </table>

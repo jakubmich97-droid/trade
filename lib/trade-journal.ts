@@ -14,6 +14,7 @@ export interface TradeJournalItem {
   status: "OPEN" | "WIN" | "LOSS" | "BREAKEVEN" | "CANCELLED" | "AMBIGUOUS";
   openedAt: string;
   openPrice: number;
+  volume: number | null;
   stopLoss: number;
   takeProfit1: number;
   takeProfit2: number;
@@ -100,13 +101,13 @@ export async function persistAnalysis(input: AnalyzeRequest, analysis: TradeAnal
     INSERT INTO trades (
       analysis_id, mode, direction, opened_at, entry_price, stop_loss,
       take_profit_1, take_profit_2, recommended_hold_min_minutes, recommended_hold_max_minutes,
-      risk_percent, account_size_czk, risk_amount_czk,
+      position_size, risk_percent, account_size_czk, risk_amount_czk,
       note
     ) VALUES (
       ${analysisId}, 'PAPER', ${analysis.verdict}, ${input.xtbPriceAt},
       ${levels.entry}, ${levels.stop}, ${levels.tp1}, ${levels.tp2},
       ${analysis.setup.holding_period_min_minutes}, ${analysis.setup.holding_period_max_minutes},
-      ${input.riskPercent}, ${input.accountSize}, ${riskAmount},
+      ${input.volume}, ${input.riskPercent}, ${input.accountSize}, ${riskAmount},
       'Automaticky vytvořený systémový obchod'
     )
     ON CONFLICT (analysis_id, mode)
@@ -139,12 +140,12 @@ export async function confirmLiveTrade(analysisId: string) {
     INSERT INTO trades (
       analysis_id, mode, direction, opened_at, entry_price, stop_loss,
       take_profit_1, take_profit_2, recommended_hold_min_minutes, recommended_hold_max_minutes,
-      risk_percent, account_size_czk, risk_amount_czk,
+      position_size, risk_percent, account_size_czk, risk_amount_czk,
       note
     ) VALUES (
       ${analysisId}, 'LIVE', ${stored.verdict}, now(), ${levels.entry}, ${levels.stop},
       ${levels.tp1}, ${levels.tp2}, ${analysis.setup.holding_period_min_minutes}, ${analysis.setup.holding_period_max_minutes},
-      ${input.riskPercent}, ${input.accountSize}, ${riskAmount},
+      ${input.volume ?? null}, ${input.riskPercent}, ${input.accountSize}, ${riskAmount},
       'Uživatel potvrdil vstup v XTB'
     )
     ON CONFLICT (analysis_id, mode)
@@ -163,6 +164,7 @@ interface JournalDatabaseRow {
   status: TradeJournalItem["status"];
   opened_at: string;
   open_price: string;
+  position_size: string | null;
   stop_loss: string;
   take_profit_1: string;
   take_profit_2: string;
@@ -189,14 +191,17 @@ export async function getTradeJournal(): Promise<TradeJournalItem[]> {
   const sql = getSql();
   const rows = await sql`
     SELECT
-      trade_id, mode, instrument, direction, status, opened_at, open_price,
-      stop_loss, take_profit_1, take_profit_2,
-      recommended_hold_min_minutes, recommended_hold_max_minutes,
-      closed_at, close_price, exit_reason, close_note, result_points,
-      result_percent, result_r, actual_hold_minutes, confidence, total_score,
-      strategy_version
-    FROM v_trade_journal
-    ORDER BY opened_at DESC
+      journal.trade_id, journal.mode, journal.instrument, journal.direction, journal.status,
+      journal.opened_at, journal.open_price, source_trade.position_size,
+      journal.stop_loss, journal.take_profit_1, journal.take_profit_2,
+      journal.recommended_hold_min_minutes, journal.recommended_hold_max_minutes,
+      journal.closed_at, journal.close_price, journal.exit_reason, journal.close_note,
+      journal.result_points, journal.result_percent, journal.result_r,
+      journal.actual_hold_minutes, journal.confidence, journal.total_score,
+      journal.strategy_version
+    FROM v_trade_journal AS journal
+    JOIN trades AS source_trade ON source_trade.id = journal.trade_id
+    ORDER BY journal.opened_at DESC
     LIMIT 100
   ` as JournalDatabaseRow[];
 
@@ -208,6 +213,7 @@ export async function getTradeJournal(): Promise<TradeJournalItem[]> {
     status: row.status,
     openedAt: row.opened_at,
     openPrice: Number(row.open_price),
+    volume: optionalNumber(row.position_size),
     stopLoss: Number(row.stop_loss),
     takeProfit1: Number(row.take_profit_1),
     takeProfit2: Number(row.take_profit_2),
@@ -279,4 +285,38 @@ export async function deleteTrade(tradeId: string) {
 
   if (!rows[0]) throw new Error("Obchod nebyl nalezen nebo už byl odstraněn.");
   return rows[0].id;
+}
+
+export async function updateTrade(input: {
+  tradeId: string;
+  openedAt: string;
+  openPrice: number;
+  volume: number;
+  stopLoss: number;
+  takeProfit1: number;
+  takeProfit2: number;
+  closedAt: string | null;
+  closePrice: number | null;
+  exitReason: ExitReason | null;
+}) {
+  const sql = getSql();
+  const rows = await sql`
+    UPDATE trades
+    SET
+      opened_at = ${input.openedAt},
+      entry_price = ${input.openPrice},
+      position_size = ${input.volume},
+      stop_loss = ${input.stopLoss},
+      take_profit_1 = ${input.takeProfit1},
+      take_profit_2 = ${input.takeProfit2},
+      closed_at = ${input.closedAt},
+      exit_price = ${input.closePrice},
+      exit_reason = ${input.exitReason}
+    WHERE id = ${input.tradeId}
+    RETURNING id, status, result_r
+  ` as Array<{ id: string; status: string; result_r: string | null }>;
+
+  const trade = rows[0];
+  if (!trade) throw new Error("Obchod nebyl nalezen.");
+  return { tradeId: trade.id, status: trade.status, resultR: optionalNumber(trade.result_r) };
 }

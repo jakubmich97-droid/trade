@@ -39,6 +39,9 @@ function isInstrument(value: unknown): value is InstrumentId {
 function validate(body: Partial<AnalyzeRequest>): string | null {
   if (!isInstrument(body.instrument)) return "Vyber podporovaný instrument.";
   if (!Number.isFinite(body.xtbPrice) || !body.xtbPrice || body.xtbPrice <= 0) return "Aktuální cena XTB je povinná a musí být kladné číslo.";
+  if (!Number.isFinite(body.volume) || !body.volume || body.volume <= 0 || body.volume > 1000) {
+    return "Objem obchodu je povinný a musí být mezi 0 a 1 000 loty.";
+  }
   if (typeof body.xtbPriceAt !== "string" || !body.xtbPriceAt) return "Čas ceny XTB je povinný.";
   const priceTime = Date.parse(body.xtbPriceAt);
   if (!Number.isFinite(priceTime)) return "Čas ceny XTB není platný.";
@@ -102,6 +105,7 @@ export async function POST(request: Request) {
       instrument: body.instrument!,
       xtbPrice: body.xtbPrice!,
       xtbPriceAt: body.xtbPriceAt!,
+      volume: body.volume!,
       riskPercent: body.riskPercent!,
       accountSize: body.accountSize ?? null,
     };
