@@ -1,6 +1,6 @@
 export type Verdict = "LONG" | "SHORT" | "NO_TRADE";
 export type Signal = "bullish" | "bearish" | "neutral";
-export type InstrumentId = "DE40" | "US100" | "EURUSD";
+export type InstrumentId = "DE40" | "US100" | "US500" | "EURUSD";
 export type AnalysisTimeframe = "H1" | "M15" | "M5";
 
 export interface MarketCandle {
@@ -77,7 +77,7 @@ interface Snapshot extends TimeframeReading {
   notes: string[];
 }
 
-const PRICE_DIGITS: Record<InstrumentId, number> = { DE40: 1, US100: 1, EURUSD: 5 };
+const PRICE_DIGITS: Record<InstrumentId, number> = { DE40: 1, US100: 1, US500: 1, EURUSD: 5 };
 
 function lastValue(values: number[]) {
   const value = values.at(-1);
