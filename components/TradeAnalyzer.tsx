@@ -65,6 +65,78 @@ interface StatsState {
   performance: PerformanceItem[];
 }
 
+interface TradeJournalItem {
+  tradeId: string;
+  mode: "PAPER" | "LIVE";
+  instrument: InstrumentId;
+  direction: "LONG" | "SHORT";
+  status: "OPEN" | "WIN" | "LOSS" | "BREAKEVEN" | "CANCELLED" | "AMBIGUOUS";
+  openedAt: string;
+  openPrice: number;
+  recommendedHoldMinMinutes: number | null;
+  recommendedHoldMaxMinutes: number | null;
+  closedAt: string | null;
+  closePrice: number | null;
+  exitReason: string | null;
+  resultPoints: number | null;
+  resultPercent: number | null;
+  resultR: number | null;
+  actualHoldMinutes: number | null;
+}
+
+interface CloseForm {
+  closePrice: string;
+  closedAt: string;
+  exitReason: "TP1" | "TP2" | "SL" | "BE" | "TIME_STOP" | "MANUAL";
+}
+
+const PRAGUE_TIME_FORMATTER = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Europe/Prague",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
+
+function pragueParts(date: Date) {
+  return Object.fromEntries(PRAGUE_TIME_FORMATTER.formatToParts(date).map((part) => [part.type, part.value]));
+}
+
+function pragueNowInput(date = new Date()) {
+  const parts = pragueParts(date);
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+
+function pragueInputToIso(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!match) throw new Error("Čas nemá platný formát.");
+  const desiredUtc = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]));
+  const firstParts = pragueParts(new Date(desiredUtc));
+  const renderedUtc = Date.UTC(Number(firstParts.year), Number(firstParts.month) - 1, Number(firstParts.day), Number(firstParts.hour), Number(firstParts.minute));
+  const firstResult = desiredUtc - (renderedUtc - desiredUtc);
+  const checkParts = pragueParts(new Date(firstResult));
+  const checkUtc = Date.UTC(Number(checkParts.year), Number(checkParts.month) - 1, Number(checkParts.day), Number(checkParts.hour), Number(checkParts.minute));
+  return new Date(firstResult + desiredUtc - checkUtc).toISOString();
+}
+
+function formatPragueTime(value: string) {
+  return new Intl.DateTimeFormat("cs-CZ", {
+    timeZone: "Europe/Prague",
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function formatJournalPrice(instrument: InstrumentId, value: number) {
+  return value.toLocaleString("cs-CZ", {
+    minimumFractionDigits: instrument === "EURUSD" ? 5 : 1,
+    maximumFractionDigits: instrument === "EURUSD" ? 5 : 1,
+  });
+}
+
 function verdictLabel(verdict: Verdict) {
   return verdict === "NO_TRADE" ? "NO TRADE" : verdict;
 }
@@ -87,6 +159,7 @@ export function TradeAnalyzer() {
   const resultRef = useRef<HTMLElement>(null);
   const [instrument, setInstrument] = useState<InstrumentId>("DE40");
   const [xtbPrice, setXtbPrice] = useState("");
+  const [xtbPriceAt, setXtbPriceAt] = useState(() => pragueNowInput());
   const [riskPercent, setRiskPercent] = useState(1);
   const [accountSize, setAccountSize] = useState("");
   const [loading, setLoading] = useState(false);
@@ -97,6 +170,10 @@ export function TradeAnalyzer() {
   const [confirming, setConfirming] = useState(false);
   const [confirmNotice, setConfirmNotice] = useState("");
   const [stats, setStats] = useState<StatsState | null>(null);
+  const [journal, setJournal] = useState<TradeJournalItem[]>([]);
+  const [journalError, setJournalError] = useState("");
+  const [closingTradeId, setClosingTradeId] = useState<string | null>(null);
+  const [closeForms, setCloseForms] = useState<Record<string, CloseForm>>({});
 
   async function loadStats() {
     try {
@@ -108,6 +185,18 @@ export function TradeAnalyzer() {
     }
   }
 
+  async function loadJournal() {
+    try {
+      const response = await fetch("/api/trades", { cache: "no-store" });
+      const payload = (await response.json()) as { trades?: TradeJournalItem[]; error?: string };
+      if (!response.ok || !payload.trades) throw new Error(payload.error || "Obchodní deník se nepodařilo načíst.");
+      setJournal(payload.trades);
+      setJournalError("");
+    } catch (requestError) {
+      setJournalError(requestError instanceof Error ? requestError.message : "Obchodní deník se nepodařilo načíst.");
+    }
+  }
+
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem("tradelens-data-history");
@@ -115,7 +204,7 @@ export function TradeAnalyzer() {
     } catch {
       window.localStorage.removeItem("tradelens-data-history");
     }
-    void loadStats();
+    void Promise.all([loadStats(), loadJournal()]);
   }, []);
 
   const estimatedRisk = useMemo(() => {
@@ -151,7 +240,8 @@ export function TradeAnalyzer() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           instrument,
-          xtbPrice: xtbPrice ? parseLocalizedNumber(xtbPrice) : null,
+          xtbPrice: parseLocalizedNumber(xtbPrice),
+          xtbPriceAt: pragueInputToIso(xtbPriceAt),
           riskPercent,
           accountSize: accountSize ? Number(accountSize) : null,
         }),
@@ -161,7 +251,7 @@ export function TradeAnalyzer() {
       setAnalysis(payload.analysis);
       setPersistence(payload.persistence ?? null);
       saveHistory(payload.analysis);
-      void loadStats();
+      void Promise.all([loadStats(), loadJournal()]);
       window.setTimeout(() => resultRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Analýza selhala.");
@@ -183,11 +273,60 @@ export function TradeAnalyzer() {
       const payload = (await response.json()) as { saved?: boolean; error?: string };
       if (!response.ok || !payload.saved) throw new Error(payload.error || "Obchod se nepodařilo uložit.");
       setConfirmNotice("Reálný obchod je uložený jako LIVE. Opakované kliknutí nevytvoří duplicitu.");
-      void loadStats();
+      void Promise.all([loadStats(), loadJournal()]);
     } catch (requestError) {
       setConfirmNotice(requestError instanceof Error ? requestError.message : "Uložení obchodu selhalo.");
     } finally {
       setConfirming(false);
+    }
+  }
+
+  function closeFormFor(tradeId: string): CloseForm {
+    return closeForms[tradeId] ?? { closePrice: "", closedAt: pragueNowInput(), exitReason: "MANUAL" };
+  }
+
+  function updateCloseForm(tradeId: string, update: Partial<CloseForm>) {
+    setCloseForms((current) => ({
+      ...current,
+      [tradeId]: {
+        ...(current[tradeId] ?? { closePrice: "", closedAt: pragueNowInput(), exitReason: "MANUAL" }),
+        ...update,
+      },
+    }));
+  }
+
+  async function submitClose(trade: TradeJournalItem) {
+    const form = closeFormFor(trade.tradeId);
+    const closePrice = parseLocalizedNumber(form.closePrice);
+    if (!Number.isFinite(closePrice) || closePrice <= 0) {
+      setJournalError("U uzavíraného obchodu zadej platnou close cenu.");
+      return;
+    }
+    setClosingTradeId(trade.tradeId);
+    setJournalError("");
+    try {
+      const response = await fetch("/api/trades/close", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tradeId: trade.tradeId,
+          closePrice,
+          closedAt: pragueInputToIso(form.closedAt),
+          exitReason: form.exitReason,
+        }),
+      });
+      const payload = (await response.json()) as { saved?: boolean; error?: string };
+      if (!response.ok || !payload.saved) throw new Error(payload.error || "Obchod se nepodařilo uzavřít.");
+      setCloseForms((current) => {
+        const next = { ...current };
+        delete next[trade.tradeId];
+        return next;
+      });
+      await Promise.all([loadJournal(), loadStats()]);
+    } catch (requestError) {
+      setJournalError(requestError instanceof Error ? requestError.message : "Obchod se nepodařilo uzavřít.");
+    } finally {
+      setClosingTradeId(null);
     }
   }
 
@@ -239,7 +378,7 @@ export function TradeAnalyzer() {
 
           <div className="instrument-grid">
             {INSTRUMENTS.map((item) => (
-              <button key={item.id} type="button" className={`instrument-card ${instrument === item.id ? "instrument-card--active" : ""}`} onClick={() => { setInstrument(item.id); setAnalysis(null); setXtbPrice(""); }}>
+              <button key={item.id} type="button" className={`instrument-card ${instrument === item.id ? "instrument-card--active" : ""}`} onClick={() => { setInstrument(item.id); setAnalysis(null); setXtbPrice(""); setXtbPriceAt(pragueNowInput()); }}>
                 <span><BarChart3 size={19} /></span>
                 <strong>{item.name}</strong>
                 <small>{item.description}</small>
@@ -264,13 +403,17 @@ export function TradeAnalyzer() {
 
         <div className="panel settings-panel">
           <div className="panel__heading">
-            <div><span className="step">02</span><div><h2>Nastavení obchodu</h2><p>Cena z XTB zpřesní vstup, SL a TP.</p></div></div>
+            <div><span className="step">02</span><div><h2>Nastavení obchodu</h2><p>Zadej aktuální cenu a její přesný středoevropský čas.</p></div></div>
           </div>
 
           <div className="form-grid">
             <label className="field field--wide">
-              <span>Aktuální cena v XTB <em>volitelné, ale doporučené</em></span>
-              <div className="input-wrap"><Gauge size={17} /><input inputMode="decimal" value={xtbPrice} onChange={(event) => setXtbPrice(event.target.value)} placeholder={instrument === "EURUSD" ? "např. 1,16520" : "např. 24 850,5"} /></div>
+              <span>Aktuální cena v XTB <em>povinné</em></span>
+              <div className="input-wrap"><Gauge size={17} /><input required inputMode="decimal" value={xtbPrice} onChange={(event) => setXtbPrice(event.target.value)} placeholder={instrument === "EURUSD" ? "např. 1,16520" : "např. 24 850,5"} /></div>
+            </label>
+            <label className="field field--wide">
+              <span>Čas zadané ceny <em>Europe/Prague · povinné</em></span>
+              <div className="datetime-wrap"><Clock3 size={17} /><input required type="datetime-local" value={xtbPriceAt} onChange={(event) => setXtbPriceAt(event.target.value)} /><button type="button" onClick={() => setXtbPriceAt(pragueNowInput())}>Nyní</button></div>
             </label>
             <label className="field">
               <span>Riziko na obchod</span>
@@ -294,7 +437,7 @@ export function TradeAnalyzer() {
           </div>
 
           {error && <div className="error-message"><AlertTriangle size={17} /><span>{error}</span></div>}
-          <button className="analyze-button" type="button" onClick={analyze} disabled={loading}>
+          <button className="analyze-button" type="button" onClick={analyze} disabled={loading || !xtbPrice.trim() || !xtbPriceAt}>
             {loading ? <><LoaderCircle className="spin" size={19} /> Stahuji a počítám 1 200 svíček…</> : <><Zap size={19} /> Načíst data a analyzovat <ArrowRight size={18} /></>}
           </button>
           <p className="button-note"><RefreshCw size={13} /> Data se při opakování obnoví nejvýše jednou za minutu.</p>
@@ -305,7 +448,7 @@ export function TradeAnalyzer() {
         <section ref={resultRef} className={`result result--${analysis.verdict.toLowerCase()}`}>
           <div className="result__top">
             <div>
-              <span className="result-kicker"><Database size={15} /> Dukascopy · {analysis.detected.instrument} · {new Date(analysis.data.last_updated).toLocaleString("cs-CZ")}</span>
+              <span className="result-kicker"><Database size={15} /> {analysis.detected.instrument} · XTB {formatJournalPrice(analysis.detected.instrument, analysis.data.xtb_price)} · {analysis.data.xtb_price_at ? formatPragueTime(analysis.data.xtb_price_at) : new Date(analysis.data.last_updated).toLocaleString("cs-CZ")}</span>
               <div className="verdict-line">
                 <span className="verdict-icon">{analysis.verdict === "LONG" ? <ArrowUpRight /> : analysis.verdict === "SHORT" ? <ArrowDownRight /> : <X />}</span>
                 <div><small>Verdikt</small><h2>{verdictLabel(analysis.verdict)}</h2></div>
@@ -366,6 +509,40 @@ export function TradeAnalyzer() {
           <div className="disclaimer"><ShieldCheck size={15} />{analysis.disclaimer}</div>
         </section>
       )}
+
+      <section className="journal-section">
+        <div className="section-heading"><div><span>Neon databáze</span><h2>Obchodní deník</h2></div><small>{journal.length} obchodů · čas Europe/Prague</small></div>
+        <p className="journal-intro">Každý aktivní signál má uloženou open cenu a čas. U otevřeného obchodu doplň close cenu, čas a důvod ukončení; výsledek a R se dopočítají automaticky.</p>
+        {journalError && <div className="error-message journal-error"><AlertTriangle size={17} /><span>{journalError}</span></div>}
+        <div className="journal-table-wrap">
+          <table className="journal-table">
+            <thead><tr><th>Typ</th><th>Instrument</th><th>Směr</th><th>Open</th><th>Plán držení</th><th>Close</th><th>Výsledek</th></tr></thead>
+            <tbody>
+              {journal.length === 0 ? <tr><td className="journal-empty" colSpan={7}>Zatím tu není žádný LONG/SHORT obchod.</td></tr> : journal.map((trade) => {
+                const closeForm = closeFormFor(trade.tradeId);
+                return <tr key={trade.tradeId}>
+                  <td><span className={`mode-badge mode-badge--${trade.mode.toLowerCase()}`}>{trade.mode}</span></td>
+                  <td><strong>{trade.instrument}</strong><small>{formatPragueTime(trade.openedAt)}</small></td>
+                  <td><span className={`direction-badge direction-badge--${trade.direction.toLowerCase()}`}>{trade.direction}</span></td>
+                  <td><strong>{formatJournalPrice(trade.instrument, trade.openPrice)}</strong><small>vstupní cena</small></td>
+                  <td>{trade.recommendedHoldMinMinutes && trade.recommendedHoldMaxMinutes ? <><strong>{trade.recommendedHoldMinMinutes}–{trade.recommendedHoldMaxMinutes} min</strong><small>doporučení</small></> : <span>—</span>}</td>
+                  <td className="journal-close-cell">
+                    {trade.status === "OPEN" ? <div className="close-editor">
+                      <input aria-label={`Close cena ${trade.instrument}`} inputMode="decimal" placeholder="Close cena" value={closeForm.closePrice} onChange={(event) => updateCloseForm(trade.tradeId, { closePrice: event.target.value })} />
+                      <input aria-label={`Close čas ${trade.instrument}`} type="datetime-local" value={closeForm.closedAt} onChange={(event) => updateCloseForm(trade.tradeId, { closedAt: event.target.value })} />
+                      <select aria-label={`Důvod ukončení ${trade.instrument}`} value={closeForm.exitReason} onChange={(event) => updateCloseForm(trade.tradeId, { exitReason: event.target.value as CloseForm["exitReason"] })}>
+                        <option value="MANUAL">Ruční ukončení</option><option value="TP1">TP1</option><option value="TP2">TP2</option><option value="SL">Stop-loss</option><option value="BE">Break-even</option><option value="TIME_STOP">Časový stop</option>
+                      </select>
+                      <button type="button" onClick={() => submitClose(trade)} disabled={closingTradeId === trade.tradeId}>{closingTradeId === trade.tradeId ? <LoaderCircle className="spin" size={14} /> : <Check size={14} />} Uzavřít</button>
+                    </div> : <><strong>{trade.closePrice === null ? "—" : formatJournalPrice(trade.instrument, trade.closePrice)}</strong><small>{trade.closedAt ? formatPragueTime(trade.closedAt) : trade.exitReason}</small></>}
+                  </td>
+                  <td><span className={`result-badge result-badge--${trade.status.toLowerCase()}`}>{trade.status}</span>{trade.resultR !== null && <small>{trade.resultR > 0 ? "+" : ""}{trade.resultR.toFixed(2)} R · {trade.resultPercent?.toFixed(2)} %</small>}</td>
+                </tr>;
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section className="performance-section">
         <div className="section-heading"><div><span>Neon databáze</span><h2>Výkonnost strategie</h2></div><small>{stats ? `${stats.savedAnalyses} uložených analýz` : "Načítám statistiky…"}</small></div>

@@ -19,7 +19,9 @@ Při každém spuštění se načte až 400 uzavřených svíček pro každý ti
 
 Pravidlový engine počítá EMA 20/50/200, RSI 14, ATR 14 a price action posledních svíček. LONG nebo SHORT vrátí pouze při silné shodě všech tří timeframe; jinak zůstává NO TRADE. Volitelná aktuální cena z XTB posune vypočtené vstupní a výstupní úrovně na XTB feed. Aktivní signál obsahuje také odhad doporučené doby držení a časový stop odvozený z ATR na M15.
 
-Každá analýza se ukládá do Neon PostgreSQL. Aktivní LONG/SHORT zároveň vytvoří PAPER obchod a tlačítko „Vstoupil jsem“ uloží samostatný LIVE obchod potvrzený v XTB. Opakovaná analýza stejné uzavřené M5 svíčky nevytvoří duplicitu.
+Každá analýza se ukládá do Neon PostgreSQL. Pro spuštění je povinná aktuální cena z XTB a její čas v pásmu Europe/Prague. Aktivní LONG/SHORT zároveň vytvoří PAPER obchod a tlačítko „Vstoupil jsem“ uloží samostatný LIVE obchod potvrzený v XTB. Opakovaná analýza stejné uzavřené M5 svíčky nevytvoří duplicitu.
+
+Obchodní deník načítá data z pohledu `v_trade_journal`. U otevřeného obchodu lze ručně doplnit close cenu, čas a důvod ukončení. Databázový trigger následně určí WIN, LOSS nebo BREAKEVEN a vypočítá výsledek v R.
 
 ## Lokální spuštění
 

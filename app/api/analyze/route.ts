@@ -38,9 +38,13 @@ function isInstrument(value: unknown): value is InstrumentId {
 
 function validate(body: Partial<AnalyzeRequest>): string | null {
   if (!isInstrument(body.instrument)) return "Vyber podporovaný instrument.";
-  if (body.xtbPrice !== null && body.xtbPrice !== undefined && (!Number.isFinite(body.xtbPrice) || body.xtbPrice <= 0)) {
-    return "Aktuální cena XTB musí být kladné číslo.";
-  }
+  if (!Number.isFinite(body.xtbPrice) || !body.xtbPrice || body.xtbPrice <= 0) return "Aktuální cena XTB je povinná a musí být kladné číslo.";
+  if (typeof body.xtbPriceAt !== "string" || !body.xtbPriceAt) return "Čas ceny XTB je povinný.";
+  const priceTime = Date.parse(body.xtbPriceAt);
+  if (!Number.isFinite(priceTime)) return "Čas ceny XTB není platný.";
+  const age = Date.now() - priceTime;
+  if (age < -5 * 60_000) return "Čas ceny XTB nesmí být více než 5 minut v budoucnosti.";
+  if (age > 30 * 60_000) return "Cena XTB je starší než 30 minut. Aktualizuj cenu a stiskni Nyní.";
   if (!Number.isFinite(body.riskPercent) || !body.riskPercent || body.riskPercent < 0.1 || body.riskPercent > 5) {
     return "Riziko musí být mezi 0,1 a 5 %.";
   }
@@ -96,7 +100,8 @@ export async function POST(request: Request) {
 
     const input: AnalyzeRequest = {
       instrument: body.instrument!,
-      xtbPrice: body.xtbPrice ?? null,
+      xtbPrice: body.xtbPrice!,
+      xtbPriceAt: body.xtbPriceAt!,
       riskPercent: body.riskPercent!,
       accountSize: body.accountSize ?? null,
     };

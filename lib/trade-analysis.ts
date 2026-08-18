@@ -64,7 +64,8 @@ export interface TradeAnalysis {
     source: "Dukascopy";
     last_updated: string;
     source_price: number;
-    xtb_price: number | null;
+    xtb_price: number;
+    xtb_price_at: string;
     price_offset: number;
     total_score: number;
   };
@@ -72,7 +73,8 @@ export interface TradeAnalysis {
 
 export interface AnalyzeRequest {
   instrument: InstrumentId;
-  xtbPrice: number | null;
+  xtbPrice: number;
+  xtbPriceAt: string;
   riskPercent: number;
   accountSize: number | null;
 }
@@ -215,8 +217,8 @@ export function buildTradeAnalysis(request: AnalyzeRequest, market: Record<Analy
   if (shortAligned && totalScore <= -10 && momentumSafeShort) verdict = "SHORT";
 
   const sourcePrice = m5.close;
-  const xtbPrice = request.xtbPrice && request.xtbPrice > 0 ? request.xtbPrice : null;
-  const priceOffset = xtbPrice === null ? 0 : xtbPrice - sourcePrice;
+  const xtbPrice = request.xtbPrice;
+  const priceOffset = xtbPrice - sourcePrice;
   const entry = sourcePrice + priceOffset;
   const swingWindow = market.M5.slice(-12, -1);
   const swingLow = Math.min(...swingWindow.map((candle) => candle.low)) + priceOffset;
@@ -235,7 +237,7 @@ export function buildTradeAnalysis(request: AnalyzeRequest, market: Record<Analy
   const holdingMin = Math.max(45, estimatedM15Candles * 15);
   const holdingMax = Math.min(360, Math.max(holdingMin + 45, holdingMin * 2));
   const confidence = verdict === "NO_TRADE" ? Math.min(86, 52 + Math.max(0, 8 - Math.abs(totalScore)) * 4) : Math.min(90, 58 + Math.abs(totalScore) * 2);
-  const deviation = xtbPrice === null ? 0 : Math.abs(priceOffset / sourcePrice) * 100;
+  const deviation = Math.abs(priceOffset / sourcePrice) * 100;
   const offsetWarning = deviation > (request.instrument === "EURUSD" ? 0.2 : 0.5) ? `Zadaná cena XTB se od Dukascopy liší o ${deviation.toFixed(2)} %. Přesné úrovně proto ověř přímo v xStation.` : null;
 
   const indicators: IndicatorReading[] = snapshots.flatMap((item) => [
@@ -291,6 +293,6 @@ export function buildTradeAnalysis(request: AnalyzeRequest, market: Record<Analy
     ],
     next_step: verdict === "NO_TRADE" ? "Počkej na uzavření další M5 svíčky a spusť analýzu znovu. Nevstupuj jen proto, že je trh aktivní." : "Před vstupem zkontroluj spread a aktuální cenu v XTB. Pokud se cena vzdálila od entry o více než 0,3 ATR M5, obchod přeskoč.",
     disclaimer: "Jde o automatickou vzdělávací technickou analýzu historických OHLC dat, nikoli finanční doporučení ani garanci výsledku.",
-    data: { source: "Dukascopy", last_updated: new Date(m5.last.timestamp).toISOString(), source_price: sourcePrice, xtb_price: xtbPrice, price_offset: priceOffset, total_score: totalScore },
+    data: { source: "Dukascopy", last_updated: new Date(m5.last.timestamp).toISOString(), source_price: sourcePrice, xtb_price: xtbPrice, xtb_price_at: request.xtbPriceAt, price_offset: priceOffset, total_score: totalScore },
   };
 }
