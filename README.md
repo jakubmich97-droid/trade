@@ -21,7 +21,7 @@ Pravidlový engine počítá EMA 20/50/200, RSI 14, ATR 14 a price action posled
 
 Každá analýza se ukládá do Neon PostgreSQL. Pro spuštění je povinná aktuální cena z XTB, její čas v pásmu Europe/Prague a objem obchodu v lotech. Samotná analýza žádný obchod nevytvoří. Teprve po zobrazení výsledku uživatel potvrdí, zda do obchodu skutečně vstupuje; pouze potvrzený LONG/SHORT se uloží do obchodního deníku. Opakované potvrzení stejné analýzy nevytvoří duplicitu.
 
-Obchodní deník načítá pouze potvrzené obchody z pohledu `v_trade_journal` a z tabulky `trades`. Historické PAPER záznamy zůstávají bezpečně uložené v databázi, ale aplikace je nezobrazuje ani nezahrnuje do statistik. U otevřeného obchodu lze ručně doplnit close cenu, čas a důvod ukončení. U každé položky lze opravit open čas a cenu, objem, SL, TP1 a TP2; u uzavřeného obchodu také close údaje. Databázový trigger následně určí WIN, LOSS nebo BREAKEVEN a vypočítá výsledek v R.
+Obchodní deník načítá všechny dříve uložené obchody z pohledu `v_trade_journal` a z tabulky `trades`, aby zůstala zachovaná historická data. Nové obchody se ale vytvářejí výhradně po potvrzení vstupu uživatelem. U otevřeného obchodu lze ručně doplnit close cenu, čas a důvod ukončení. U každé položky lze opravit open čas a cenu, objem, SL, TP1 a TP2; u uzavřeného obchodu také close údaje. Databázový trigger následně určí WIN, LOSS nebo BREAKEVEN a vypočítá výsledek v R.
 Jednotlivý obchod lze z deníku také trvale odstranit po potvrzení; související analýza zůstává zachovaná.
 
 ## Lokální spuštění

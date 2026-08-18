@@ -177,7 +177,6 @@ export async function getTradeJournal(): Promise<TradeJournalItem[]> {
       journal.strategy_version
     FROM v_trade_journal AS journal
     JOIN trades AS source_trade ON source_trade.id = journal.trade_id
-    WHERE journal.mode = 'LIVE'
     ORDER BY journal.opened_at DESC
     LIMIT 100
   ` as JournalDatabaseRow[];
