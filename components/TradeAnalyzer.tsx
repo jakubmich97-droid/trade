@@ -667,7 +667,7 @@ export function TradeAnalyzer() {
           <table className="journal-table">
             <thead><tr><th>Instrument</th><th>Směr</th><th>Open</th><th>Objem</th><th>Plán držení</th><th>Close</th><th>Výsledek</th><th>Akce</th></tr></thead>
             <tbody>
-              {journal.length === 0 ? <tr><td className="journal-empty" colSpan={8}>Zatím tu není žádný potvrzený obchod.</td></tr> : journal.map((trade) => {
+              {journal.length === 0 ? <tr><td className="journal-empty" colSpan={8}>Zatím tu není žádný uložený obchod.</td></tr> : journal.map((trade) => {
                 const closeForm = closeFormFor(trade.tradeId);
                 const editForm = editForms[trade.tradeId];
                 return <Fragment key={trade.tradeId}>
@@ -722,7 +722,7 @@ export function TradeAnalyzer() {
       <section className="performance-section">
         <div className="section-heading"><div><span>Neon databáze</span><h2>Výkonnost strategie</h2></div><small>{stats ? `${stats.savedAnalyses} uložených analýz` : "Načítám statistiky…"}</small></div>
         <div className="performance-grid">
-          {[["POTVRZENÉ OBCHODY", "Pouze obchody, do kterých jsi skutečně vstoupil", confirmedStats]].map(([mode, description, values]) => {
+          {[["OBCHODY V DENÍKU", "Historické záznamy a nové potvrzené vstupy", confirmedStats]].map(([mode, description, values]) => {
             const item = values as typeof confirmedStats;
             return <div className="performance-card" key={mode as string}>
               <div><strong>{mode as string}</strong><span>{description as string}</span></div>
