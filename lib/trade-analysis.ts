@@ -58,6 +58,12 @@ export interface TradeAnalysis {
   };
   reasons: string[];
   risks: string[];
+  reanalysis: {
+    wait_minutes: number;
+    recommended_at: string;
+    trigger_timeframe: AnalysisTimeframe;
+    reason: string;
+  } | null;
   next_step: string;
   disclaimer: string;
   data: {
@@ -69,6 +75,13 @@ export interface TradeAnalysis {
     price_offset: number;
     total_score: number;
   };
+}
+
+interface ReanalysisAdvice {
+  wait_minutes: number;
+  recommended_at: string;
+  trigger_timeframe: AnalysisTimeframe;
+  reason: string;
 }
 
 export interface AnalyzeRequest {
@@ -203,6 +216,42 @@ function timeframeReading(value: Snapshot): TimeframeReading {
   return { timeframe: value.timeframe, signal: value.signal, close: value.close, ema20: value.ema20, ema50: value.ema50, ema200: value.ema200, rsi14: value.rsi14, atr14: value.atr14, candles: value.candles };
 }
 
+function buildReanalysisAdvice(request: AnalyzeRequest, h1: Snapshot, m15: Snapshot, m5: Snapshot): ReanalysisAdvice {
+  let triggerTimeframe: AnalysisTimeframe = "M5";
+  let reason = "Vyšší timeframy jsou použitelné, ale M5 zatím nepotvrdil dostatečně silný vstup.";
+
+  const allBullish = h1.signal === "bullish" && m15.signal === "bullish" && m5.signal === "bullish";
+  const allBearish = h1.signal === "bearish" && m15.signal === "bearish" && m5.signal === "bearish";
+  const m15MomentumExtreme = (allBullish && m15.rsi14 >= 72) || (allBearish && m15.rsi14 <= 28);
+  const m5MomentumExtreme = (allBullish && m5.rsi14 >= 72) || (allBearish && m5.rsi14 <= 28);
+
+  if (h1.signal === "neutral") {
+    triggerTimeframe = "H1";
+    reason = "H1 nemá jasný směr. Dřívější přepočet by pravděpodobně pracoval se stejným vyšším trendem.";
+  } else if (m15MomentumExtreme) {
+    triggerTimeframe = "M15";
+    reason = "Momentum na M15 je v extrému. Vyplatí se počkat na uzavření nové M15 svíčky.";
+  } else if (m15.signal !== h1.signal) {
+    triggerTimeframe = "M15";
+    reason = "M15 není ve směru H1. Nový výpočet má smysl až po aktualizaci středního timeframe.";
+  } else if (m5MomentumExtreme) {
+    reason = "Momentum na M5 je v extrému. Další uzavřená M5 svíčka může potvrdit zklidnění nebo pokračování pohybu.";
+  }
+
+  const intervalMinutes: Record<AnalysisTimeframe, number> = { H1: 60, M15: 15, M5: 5 };
+  const intervalMs = intervalMinutes[triggerTimeframe] * 60_000;
+  const requestTime = Date.parse(request.xtbPriceAt);
+  const referenceTime = Math.max(Number.isFinite(requestTime) ? requestTime : 0, Date.now());
+  const recommendedTime = Math.floor(referenceTime / intervalMs) * intervalMs + intervalMs + 60_000;
+
+  return {
+    wait_minutes: Math.max(1, Math.ceil((recommendedTime - referenceTime) / 60_000)),
+    recommended_at: new Date(recommendedTime).toISOString(),
+    trigger_timeframe: triggerTimeframe,
+    reason,
+  };
+}
+
 export function buildTradeAnalysis(request: AnalyzeRequest, market: Record<AnalysisTimeframe, MarketCandle[]>): TradeAnalysis {
   const h1 = snapshot("H1", market.H1);
   const m15 = snapshot("M15", market.M15);
@@ -238,6 +287,7 @@ export function buildTradeAnalysis(request: AnalyzeRequest, market: Record<Analy
   const holdingMin = Math.max(45, estimatedM15Candles * 15);
   const holdingMax = Math.min(360, Math.max(holdingMin + 45, holdingMin * 2));
   const confidence = verdict === "NO_TRADE" ? Math.min(86, 52 + Math.max(0, 8 - Math.abs(totalScore)) * 4) : Math.min(90, 58 + Math.abs(totalScore) * 2);
+  const reanalysis = verdict === "NO_TRADE" ? buildReanalysisAdvice(request, h1, m15, m5) : null;
   const deviation = Math.abs(priceOffset / sourcePrice) * 100;
   const offsetWarning = deviation > (request.instrument === "EURUSD" ? 0.2 : 0.5) ? `Zadaná cena XTB se od Dukascopy liší o ${deviation.toFixed(2)} %. Přesné úrovně proto ověř přímo v xStation.` : null;
 
@@ -256,7 +306,7 @@ export function buildTradeAnalysis(request: AnalyzeRequest, market: Record<Analy
     take_profit_2: "Nestanovuje se",
     take_profit_2_price: null,
     risk_reward: "Obchod se neotevírá",
-    invalidation: "Novou analýzu spusť až po uzavření další M5 svíčky.",
+    invalidation: `Novou analýzu spusť po uzavření další ${reanalysis!.trigger_timeframe} svíčky.`,
     holding_period: "Nestanovuje se",
     holding_period_min_minutes: null,
     holding_period_max_minutes: null,
@@ -292,7 +342,8 @@ export function buildTradeAnalysis(request: AnalyzeRequest, market: Record<Analy
       ...(offsetWarning ? [offsetWarning] : []),
       ...(request.accountSize ? [`Při riziku ${request.riskPercent} % je maximální plánovaná ztráta ${(request.accountSize * request.riskPercent / 100).toLocaleString("cs-CZ", { maximumFractionDigits: 0 })} Kč.`] : []),
     ],
-    next_step: verdict === "NO_TRADE" ? "Počkej na uzavření další M5 svíčky a spusť analýzu znovu. Nevstupuj jen proto, že je trh aktivní." : "Před vstupem zkontroluj spread a aktuální cenu v XTB. Pokud se cena vzdálila od entry o více než 0,3 ATR M5, obchod přeskoč.",
+    reanalysis,
+    next_step: verdict === "NO_TRADE" ? `Počkej přibližně ${reanalysis!.wait_minutes} min do uzavření další ${reanalysis!.trigger_timeframe} svíčky a potom spusť analýzu znovu. Nevstupuj jen proto, že je trh aktivní.` : "Před vstupem zkontroluj spread a aktuální cenu v XTB. Pokud se cena vzdálila od entry o více než 0,3 ATR M5, obchod přeskoč.",
     disclaimer: "Jde o automatickou vzdělávací technickou analýzu historických OHLC dat, nikoli finanční doporučení ani garanci výsledku.",
     data: { source: "Dukascopy", last_updated: new Date(m5.last.timestamp).toISOString(), source_price: sourcePrice, xtb_price: xtbPrice, xtb_price_at: request.xtbPriceAt, price_offset: priceOffset, total_score: totalScore },
   };

@@ -195,6 +195,12 @@ a { color: inherit; text-decoration: none; }
 .invalidation svg { color: var(--amber); flex: 0 0 auto; }
 .time-stop { margin-top: 10px; padding: 10px; display: flex; align-items: flex-start; gap: 8px; color: #afc8bd; font-size: 9px; line-height: 1.5; border: 1px solid rgba(106,169,255,.14); background: rgba(106,169,255,.045); border-radius: 9px; }
 .time-stop svg { color: var(--blue); flex: 0 0 auto; }
+.reanalysis-advice { margin-top: 11px; padding: 12px; display: flex; align-items: flex-start; gap: 9px; border: 1px solid rgba(255,191,95,.2); background: rgba(255,191,95,.055); border-radius: 10px; }
+.reanalysis-advice > svg { color: var(--amber); flex: 0 0 auto; margin-top: 1px; }
+.reanalysis-advice > div { display: flex; flex-direction: column; gap: 3px; }
+.reanalysis-advice span { color: #b89b6f; font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
+.reanalysis-advice strong { color: #ffe0ae; font-size: 11px; line-height: 1.4; }
+.reanalysis-advice p { margin: 2px 0 0; color: #aebbb5; font-size: 9px; line-height: 1.5; }
 .trade-confirm { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .trade-confirm > div:first-child { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 9px; line-height: 1.45; }
 .trade-confirm > div:first-child svg { color: var(--green); flex: 0 0 auto; }

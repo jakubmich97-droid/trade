@@ -619,6 +619,16 @@ export function TradeAnalyzer() {
               <SetupField label="Doporučená doba" value={analysis.setup.holding_period} accent={analysis.verdict !== "NO_TRADE"} />
               <div className="rr-row"><span>Risk / Reward</span><strong>{analysis.setup.risk_reward}</strong></div>
               <div className="invalidation"><AlertTriangle size={16} /><span><b>Invalidace:</b> {analysis.setup.invalidation}</span></div>
+              {analysis.verdict === "NO_TRADE" && analysis.reanalysis && (
+                <div className="reanalysis-advice">
+                  <RefreshCw size={17} />
+                  <div>
+                    <span>Znovu analyzovat</span>
+                    <strong>Za {analysis.reanalysis.wait_minutes} min · {formatPragueTime(analysis.reanalysis.recommended_at)}</strong>
+                    <p>{analysis.reanalysis.reason}</p>
+                  </div>
+                </div>
+              )}
               {analysis.verdict !== "NO_TRADE" && <div className="time-stop"><Clock3 size={16} /><span><b>Časový stop:</b> {analysis.setup.time_stop_rule}</span></div>}
               {analysis.verdict !== "NO_TRADE" && (
                 <div className="trade-confirm">

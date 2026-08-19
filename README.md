@@ -17,7 +17,7 @@ Při každém spuštění se načte až 400 uzavřených svíček pro každý ti
 - M15 hledá obchodní setup
 - M5 potvrzuje vstupní trigger
 
-Pravidlový engine počítá EMA 20/50/200, RSI 14, ATR 14 a price action posledních svíček. LONG nebo SHORT vrátí pouze při silné shodě všech tří timeframe; jinak zůstává NO TRADE. Volitelná aktuální cena z XTB posune vypočtené vstupní a výstupní úrovně na XTB feed. Aktivní signál obsahuje také odhad doporučené doby držení a časový stop odvozený z ATR na M15.
+Pravidlový engine počítá EMA 20/50/200, RSI 14, ATR 14 a price action posledních svíček. LONG nebo SHORT vrátí pouze při silné shodě všech tří timeframe; jinak zůstává NO TRADE. U NO TRADE doporučí další vhodný čas analýzy podle timeframe, který vstup blokuje. Volitelná aktuální cena z XTB posune vypočtené vstupní a výstupní úrovně na XTB feed. Aktivní signál obsahuje také odhad doporučené doby držení a časový stop odvozený z ATR na M15.
 
 Každá analýza se ukládá do Neon PostgreSQL. Pro spuštění je povinná aktuální cena z XTB, její čas v pásmu Europe/Prague a objem obchodu v lotech. Samotná analýza žádný obchod nevytvoří. Teprve po zobrazení výsledku uživatel potvrdí, zda do obchodu skutečně vstupuje; pouze potvrzený LONG/SHORT se uloží do obchodního deníku. Opakované potvrzení stejné analýzy nevytvoří duplicitu.
 
