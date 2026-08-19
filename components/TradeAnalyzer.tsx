@@ -34,6 +34,13 @@ const INSTRUMENTS: Array<{ id: InstrumentId; name: string; description: string }
   { id: "EURUSD", name: "EUR/USD", description: "Euro / US Dollar" },
 ];
 
+const XTB_PRICE_CURRENCY: Record<InstrumentId, string> = {
+  DE40: "EUR",
+  US100: "USD",
+  US500: "USD",
+  EURUSD: "USD / 1 EUR",
+};
+
 interface HistoryItem {
   id: string;
   createdAt: string;
@@ -550,8 +557,8 @@ export function TradeAnalyzer() {
 
           <div className="form-grid">
             <label className="field field--wide">
-              <span>Aktuální cena v XTB <em>povinné</em></span>
-              <div className="input-wrap"><Gauge size={17} /><input required inputMode="decimal" value={xtbPrice} onChange={(event) => setXtbPrice(event.target.value)} placeholder={instrument === "EURUSD" ? "např. 1,16520" : "např. 24 850,5"} /></div>
+              <span>Aktuální cena v XTB <em>povinné · měna kotace {XTB_PRICE_CURRENCY[instrument]}</em></span>
+              <div className="input-wrap price-input"><Gauge size={17} /><input required inputMode="decimal" value={xtbPrice} onChange={(event) => setXtbPrice(event.target.value)} placeholder={instrument === "EURUSD" ? "např. 1,16520" : "např. 24 850,5"} /><b>{XTB_PRICE_CURRENCY[instrument]}</b></div>
             </label>
             <label className="field field--wide">
               <span>Čas zadané ceny <em>Europe/Prague · povinné</em></span>

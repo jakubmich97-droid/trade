@@ -134,6 +134,8 @@ a { color: inherit; text-decoration: none; }
 .input-wrap { position: relative; }
 .input-wrap svg { position: absolute; left: 12px; top: 12px; color: #668075; }
 .input-wrap input { padding-left: 38px; }
+.price-input input { padding-right: 86px; }
+.price-input b { position: absolute; right: 12px; top: 13px; color: #769186; font-size: 10px; font-weight: 700; }
 .datetime-wrap { position: relative; display: grid; grid-template-columns: 1fr auto; gap: 8px; }
 .datetime-wrap > svg { position: absolute; left: 12px; top: 12px; color: #668075; z-index: 1; }
 .datetime-wrap input { padding-left: 38px; color-scheme: dark; }
