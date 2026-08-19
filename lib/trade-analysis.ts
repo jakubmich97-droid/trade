@@ -3,6 +3,13 @@ export type Signal = "bullish" | "bearish" | "neutral";
 export type InstrumentId = "DE40" | "US100" | "US500" | "EURUSD";
 export type AnalysisTimeframe = "H1" | "M15" | "M5";
 
+export interface CzkFxRates {
+  czkPerEur: number;
+  czkPerUsd: number;
+  asOf: string;
+  source: "ECB";
+}
+
 export interface MarketCandle {
   timestamp: number;
   open: number;
@@ -58,6 +65,22 @@ export interface TradeAnalysis {
   };
   reasons: string[];
   risks: string[];
+  position_sizing?: {
+    account_size_czk: number;
+    target_risk_percent: number;
+    target_risk_czk: number;
+    recommended_volume_lots: number | null;
+    estimated_risk_czk: number | null;
+    estimated_risk_percent: number | null;
+    minimum_volume_lots: number;
+    minimum_volume_risk_czk: number;
+    risk_per_lot_czk: number;
+    contract_multiplier: number;
+    quote_currency: "EUR" | "USD";
+    conversion_rate_czk: number;
+    conversion_rate_at: string;
+    conversion_source: "ECB";
+  } | null;
   reanalysis: {
     wait_minutes: number;
     recommended_at: string;
@@ -88,7 +111,7 @@ export interface AnalyzeRequest {
   instrument: InstrumentId;
   xtbPrice: number;
   xtbPriceAt: string;
-  volume: number;
+  volume?: number;
   riskPercent: number;
   accountSize: number | null;
 }
@@ -103,6 +126,13 @@ interface Snapshot extends TimeframeReading {
 }
 
 const PRICE_DIGITS: Record<InstrumentId, number> = { DE40: 1, US100: 1, US500: 1, EURUSD: 5 };
+const CONTRACTS: Record<InstrumentId, { multiplier: number; quoteCurrency: "EUR" | "USD" }> = {
+  DE40: { multiplier: 25, quoteCurrency: "EUR" },
+  US100: { multiplier: 20, quoteCurrency: "USD" },
+  US500: { multiplier: 50, quoteCurrency: "USD" },
+  EURUSD: { multiplier: 100_000, quoteCurrency: "USD" },
+};
+const MINIMUM_VOLUME_LOTS = 0.01;
 
 function lastValue(values: number[]) {
   const value = values.at(-1);
@@ -252,7 +282,45 @@ function buildReanalysisAdvice(request: AnalyzeRequest, h1: Snapshot, m15: Snaps
   };
 }
 
-export function buildTradeAnalysis(request: AnalyzeRequest, market: Record<AnalysisTimeframe, MarketCandle[]>): TradeAnalysis {
+function buildPositionSizing(
+  request: AnalyzeRequest,
+  verdict: Verdict,
+  entry: number,
+  stop: number,
+  fxRates: CzkFxRates,
+): TradeAnalysis["position_sizing"] {
+  if (verdict === "NO_TRADE" || !request.accountSize) return null;
+
+  const contract = CONTRACTS[request.instrument];
+  const conversionRate = contract.quoteCurrency === "EUR" ? fxRates.czkPerEur : fxRates.czkPerUsd;
+  const targetRiskCzk = request.accountSize * request.riskPercent / 100;
+  const riskPerLotCzk = Math.abs(entry - stop) * contract.multiplier * conversionRate;
+  if (!Number.isFinite(riskPerLotCzk) || riskPerLotCzk <= 0) throw new Error("Riziko pozice se nepodařilo vypočítat.");
+
+  const rawVolume = targetRiskCzk / riskPerLotCzk;
+  const roundedVolume = Math.floor((rawVolume + Number.EPSILON) * 100) / 100;
+  const recommendedVolume = roundedVolume >= MINIMUM_VOLUME_LOTS ? roundedVolume : null;
+  const estimatedRiskCzk = recommendedVolume === null ? null : recommendedVolume * riskPerLotCzk;
+
+  return {
+    account_size_czk: request.accountSize,
+    target_risk_percent: request.riskPercent,
+    target_risk_czk: targetRiskCzk,
+    recommended_volume_lots: recommendedVolume,
+    estimated_risk_czk: estimatedRiskCzk,
+    estimated_risk_percent: estimatedRiskCzk === null ? null : estimatedRiskCzk / request.accountSize * 100,
+    minimum_volume_lots: MINIMUM_VOLUME_LOTS,
+    minimum_volume_risk_czk: MINIMUM_VOLUME_LOTS * riskPerLotCzk,
+    risk_per_lot_czk: riskPerLotCzk,
+    contract_multiplier: contract.multiplier,
+    quote_currency: contract.quoteCurrency,
+    conversion_rate_czk: conversionRate,
+    conversion_rate_at: fxRates.asOf,
+    conversion_source: fxRates.source,
+  };
+}
+
+export function buildTradeAnalysis(request: AnalyzeRequest, market: Record<AnalysisTimeframe, MarketCandle[]>, fxRates: CzkFxRates): TradeAnalysis {
   const h1 = snapshot("H1", market.H1);
   const m15 = snapshot("M15", market.M15);
   const m5 = snapshot("M5", market.M5);
@@ -288,6 +356,7 @@ export function buildTradeAnalysis(request: AnalyzeRequest, market: Record<Analy
   const holdingMax = Math.min(360, Math.max(holdingMin + 45, holdingMin * 2));
   const confidence = verdict === "NO_TRADE" ? Math.min(86, 52 + Math.max(0, 8 - Math.abs(totalScore)) * 4) : Math.min(90, 58 + Math.abs(totalScore) * 2);
   const reanalysis = verdict === "NO_TRADE" ? buildReanalysisAdvice(request, h1, m15, m5) : null;
+  const positionSizing = buildPositionSizing(request, verdict, entry, stop, fxRates);
   const deviation = Math.abs(priceOffset / sourcePrice) * 100;
   const offsetWarning = deviation > (request.instrument === "EURUSD" ? 0.2 : 0.5) ? `Zadaná cena XTB se od Dukascopy liší o ${deviation.toFixed(2)} %. Přesné úrovně proto ověř přímo v xStation.` : null;
 
@@ -339,9 +408,11 @@ export function buildTradeAnalysis(request: AnalyzeRequest, market: Record<Analy
     risks: [
       "Dukascopy a XTB používají odlišný CFD feed; směr trhu bývá podobný, přesné ceny se mohou lišit.",
       "Pravidla pracují pouze s technickými daty a nezohledňují makroekonomické zprávy ani náhlé události.",
+      ...(positionSizing ? ["Doporučený objem je odhad podle aktuálního SL a referenčního kurzu ECB. Spread, skluz a kurzová přirážka XTB mohou skutečnou ztrátu zvýšit."] : []),
       ...(offsetWarning ? [offsetWarning] : []),
       ...(request.accountSize ? [`Při riziku ${request.riskPercent} % je maximální plánovaná ztráta ${(request.accountSize * request.riskPercent / 100).toLocaleString("cs-CZ", { maximumFractionDigits: 0 })} Kč.`] : []),
     ],
+    position_sizing: positionSizing,
     reanalysis,
     next_step: verdict === "NO_TRADE" ? `Počkej přibližně ${reanalysis!.wait_minutes} min do uzavření další ${reanalysis!.trigger_timeframe} svíčky a potom spusť analýzu znovu. Nevstupuj jen proto, že je trh aktivní.` : "Před vstupem zkontroluj spread a aktuální cenu v XTB. Pokud se cena vzdálila od entry o více než 0,3 ATR M5, obchod přeskoč.",
     disclaimer: "Jde o automatickou vzdělávací technickou analýzu historických OHLC dat, nikoli finanční doporučení ani garanci výsledku.",

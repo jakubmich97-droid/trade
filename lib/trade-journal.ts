@@ -2,7 +2,7 @@ import "server-only";
 import { getSql } from "@/lib/db";
 import type { AnalyzeRequest, TradeAnalysis } from "@/lib/trade-analysis";
 
-export const STRATEGY_VERSION = "v1.2.0";
+export const STRATEGY_VERSION = "v1.3.0";
 
 export type ExitReason = "TP1" | "TP2" | "SL" | "BE" | "TIME_STOP" | "MANUAL";
 
@@ -15,6 +15,9 @@ export interface TradeJournalItem {
   openedAt: string;
   openPrice: number;
   volume: number | null;
+  accountSizeCzk: number | null;
+  riskPercent: number | null;
+  riskAmountCzk: number | null;
   stopLoss: number;
   takeProfit1: number;
   takeProfit2: number;
@@ -111,7 +114,13 @@ export async function confirmLiveTrade(analysisId: string) {
   const analysis = stored.raw_analysis.analysis;
   const input = stored.raw_analysis.request;
   const levels = tradeLevels(analysis);
-  const riskAmount = input.accountSize ? input.accountSize * input.riskPercent / 100 : null;
+  const sizing = analysis.position_sizing;
+  const recommendedVolume = sizing?.recommended_volume_lots ?? input.volume ?? null;
+  if (!recommendedVolume) {
+    throw new Error("Pro nastavené riziko nelze doporučit ani minimální objem 0,01 lotu. Zvyš účet, uprav riziko nebo obchod vynech.");
+  }
+  const riskAmount = sizing?.estimated_risk_czk ?? (input.accountSize ? input.accountSize * input.riskPercent / 100 : null);
+  const actualRiskPercent = sizing?.estimated_risk_percent ?? input.riskPercent;
   const trades = await sql`
     INSERT INTO trades (
       analysis_id, mode, direction, opened_at, entry_price, stop_loss,
@@ -121,8 +130,8 @@ export async function confirmLiveTrade(analysisId: string) {
     ) VALUES (
       ${analysisId}, 'LIVE', ${stored.verdict}, ${input.xtbPriceAt}, ${levels.entry}, ${levels.stop},
       ${levels.tp1}, ${levels.tp2}, ${analysis.setup.holding_period_min_minutes}, ${analysis.setup.holding_period_max_minutes},
-      ${input.volume ?? null}, ${input.riskPercent}, ${input.accountSize}, ${riskAmount},
-      'Uživatel po zobrazení analýzy potvrdil vstup v XTB'
+      ${recommendedVolume}, ${actualRiskPercent}, ${input.accountSize}, ${riskAmount},
+      ${`Uživatel potvrdil vstup; cílové riziko ${input.riskPercent} %, objem doporučen aplikací`}
     )
     ON CONFLICT (analysis_id, mode)
     DO UPDATE SET analysis_id = EXCLUDED.analysis_id
@@ -141,6 +150,9 @@ interface JournalDatabaseRow {
   opened_at: string;
   open_price: string;
   position_size: string | null;
+  account_size_czk: string | null;
+  risk_percent: string | null;
+  risk_amount_czk: string | null;
   stop_loss: string;
   take_profit_1: string;
   take_profit_2: string;
@@ -170,6 +182,7 @@ export async function getTradeJournal(limit = 100): Promise<TradeJournalItem[]> 
     SELECT
       journal.trade_id, journal.mode, journal.instrument, journal.direction, journal.status,
       journal.opened_at, journal.open_price, source_trade.position_size,
+      source_trade.account_size_czk, source_trade.risk_percent, source_trade.risk_amount_czk,
       journal.stop_loss, journal.take_profit_1, journal.take_profit_2,
       journal.recommended_hold_min_minutes, journal.recommended_hold_max_minutes,
       journal.closed_at, journal.close_price, journal.exit_reason, journal.close_note,
@@ -191,6 +204,9 @@ export async function getTradeJournal(limit = 100): Promise<TradeJournalItem[]> 
     openedAt: row.opened_at,
     openPrice: Number(row.open_price),
     volume: optionalNumber(row.position_size),
+    accountSizeCzk: optionalNumber(row.account_size_czk),
+    riskPercent: optionalNumber(row.risk_percent),
+    riskAmountCzk: optionalNumber(row.risk_amount_czk),
     stopLoss: Number(row.stop_loss),
     takeProfit1: Number(row.take_profit_1),
     takeProfit2: Number(row.take_profit_2),

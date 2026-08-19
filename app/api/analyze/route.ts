@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getRealTimeRates, type JsonItem } from "dukascopy-node";
 import {
   buildTradeAnalysis,
+  type CzkFxRates,
   type AnalysisTimeframe,
   type AnalyzeRequest,
   type InstrumentId,
@@ -31,6 +32,7 @@ interface CacheEntry {
 }
 
 const marketCache = new Map<InstrumentId, CacheEntry>();
+let fxCache: { expiresAt: number; rates: CzkFxRates } | null = null;
 
 function isInstrument(value: unknown): value is InstrumentId {
   return typeof value === "string" && value in INSTRUMENTS;
@@ -39,9 +41,6 @@ function isInstrument(value: unknown): value is InstrumentId {
 function validate(body: Partial<AnalyzeRequest>): string | null {
   if (!isInstrument(body.instrument)) return "Vyber podporovaný instrument.";
   if (!Number.isFinite(body.xtbPrice) || !body.xtbPrice || body.xtbPrice <= 0) return "Aktuální cena XTB je povinná a musí být kladné číslo.";
-  if (!Number.isFinite(body.volume) || !body.volume || body.volume <= 0 || body.volume > 1000) {
-    return "Objem obchodu je povinný a musí být mezi 0 a 1 000 loty.";
-  }
   if (typeof body.xtbPriceAt !== "string" || !body.xtbPriceAt) return "Čas ceny XTB je povinný.";
   const priceTime = Date.parse(body.xtbPriceAt);
   if (!Number.isFinite(priceTime)) return "Čas ceny XTB není platný.";
@@ -51,10 +50,35 @@ function validate(body: Partial<AnalyzeRequest>): string | null {
   if (!Number.isFinite(body.riskPercent) || !body.riskPercent || body.riskPercent < 0.1 || body.riskPercent > 5) {
     return "Riziko musí být mezi 0,1 a 5 %.";
   }
-  if (body.accountSize !== null && body.accountSize !== undefined && (!Number.isFinite(body.accountSize) || body.accountSize <= 0)) {
-    return "Velikost účtu musí být kladné číslo.";
-  }
+  if (!Number.isFinite(body.accountSize) || !body.accountSize || body.accountSize <= 0) return "Velikost účtu je povinná a musí být kladné číslo.";
   return null;
+}
+
+async function fetchEcbRate(currency: "CZK" | "USD") {
+  const response = await fetch(`https://data-api.ecb.europa.eu/service/data/EXR/D.${currency}.EUR.SP00.A?format=csvdata&lastNObservations=1`, {
+    cache: "no-store",
+    headers: { Accept: "text/csv" },
+  });
+  if (!response.ok) throw new Error(`ECB kurz ${currency} není dostupný.`);
+  const rows = (await response.text()).trim().split(/\r?\n/);
+  const columns = rows.at(-1)?.split(",");
+  const value = Number(columns?.[7]);
+  const asOf = columns?.[6];
+  if (!Number.isFinite(value) || !asOf) throw new Error(`ECB kurz ${currency} nemá platný formát.`);
+  return { value, asOf };
+}
+
+async function getCzkFxRates(): Promise<CzkFxRates> {
+  if (fxCache && fxCache.expiresAt > Date.now()) return fxCache.rates;
+  const [czkPerEur, usdPerEur] = await Promise.all([fetchEcbRate("CZK"), fetchEcbRate("USD")]);
+  const rates: CzkFxRates = {
+    czkPerEur: czkPerEur.value,
+    czkPerUsd: czkPerEur.value / usdPerEur.value,
+    asOf: czkPerEur.asOf,
+    source: "ECB",
+  };
+  fxCache = { rates, expiresAt: Date.now() + 6 * 60 * 60_000 };
+  return rates;
 }
 
 async function fetchCandles(instrument: InstrumentId, timeframe: AnalysisTimeframe): Promise<MarketCandle[]> {
@@ -105,12 +129,11 @@ export async function POST(request: Request) {
       instrument: body.instrument!,
       xtbPrice: body.xtbPrice!,
       xtbPriceAt: body.xtbPriceAt!,
-      volume: body.volume!,
       riskPercent: body.riskPercent!,
-      accountSize: body.accountSize ?? null,
+      accountSize: body.accountSize!,
     };
-    const market = await getMarket(input.instrument);
-    const analysis = buildTradeAnalysis(input, market);
+    const [market, fxRates] = await Promise.all([getMarket(input.instrument), getCzkFxRates()]);
+    const analysis = buildTradeAnalysis(input, market, fxRates);
     let persistence: PersistenceResult = { stored: false, analysisId: null };
     try {
       persistence = await persistAnalysis(input, analysis);
@@ -120,8 +143,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ analysis, persistence });
   } catch (error) {
     console.error("Dukascopy analysis error", error);
+    const isCurrencyError = error instanceof Error && error.message.startsWith("ECB kurz");
     return NextResponse.json(
-      { error: "Tržní data se teď nepodařilo načíst. Zkus analýzu znovu za chvíli." },
+      { error: isCurrencyError ? "Kurzová data ECB pro výpočet objemu nejsou právě dostupná. Zkus analýzu znovu za chvíli." : "Tržní data se teď nepodařilo načíst. Zkus analýzu znovu za chvíli." },
       { status: 502 },
     );
   }
