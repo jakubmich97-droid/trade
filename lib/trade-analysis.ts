@@ -37,6 +37,36 @@ export interface TimeframeReading {
   candles: number;
 }
 
+export type MacroImpact = "LOW" | "MEDIUM" | "HIGH";
+export type MacroRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "UNKNOWN";
+
+export interface MacroEvent {
+  date: string;
+  country: string;
+  currency: string;
+  event: string;
+  impact: MacroImpact;
+  previous: number | string | null;
+  estimate: number | string | null;
+  actual: number | string | null;
+  unit: string | null;
+  minutes_from_analysis: number;
+}
+
+export interface MacroContext {
+  provider: "FMP";
+  status: "ACTIVE" | "UNAVAILABLE" | "ERROR";
+  fetched_at: string;
+  risk_level: MacroRiskLevel;
+  blocks_trade: boolean;
+  technical_verdict: Verdict;
+  technical_confidence: number;
+  applied_rule: string;
+  nearest_event: MacroEvent | null;
+  events: MacroEvent[];
+  reanalysis_at: string | null;
+}
+
 export interface TradeAnalysis {
   verdict: Verdict;
   market_read: string;
@@ -65,6 +95,7 @@ export interface TradeAnalysis {
   };
   reasons: string[];
   risks: string[];
+  macro_context?: MacroContext;
   position_sizing?: {
     account_size_czk: number;
     target_risk_percent: number;
@@ -435,7 +466,7 @@ export function buildTradeAnalysis(request: AnalyzeRequest, market: Record<Analy
     reasons,
     risks: [
       "Dukascopy a XTB používají odlišný CFD feed; směr trhu bývá podobný, přesné ceny se mohou lišit.",
-      "Pravidla pracují pouze s technickými daty a nezohledňují makroekonomické zprávy ani náhlé události.",
+      "Technický model nedokáže předvídat neplánované zprávy, geopolitické události ani mimořádné projevy centrálních bankéřů.",
       ...(positionSizing ? ["Doporučený objem je odhad podle aktuálního SL a referenčního kurzu ECB. Spread, skluz a kurzová přirážka XTB mohou skutečnou ztrátu zvýšit."] : []),
       ...(offsetWarning ? [offsetWarning] : []),
       ...(request.accountSize ? [`Při riziku ${request.riskPercent} % je maximální plánovaná ztráta ${(request.accountSize * request.riskPercent / 100).toLocaleString("cs-CZ", { maximumFractionDigits: 0 })} Kč.`] : []),

@@ -9,6 +9,7 @@ import {
   type MarketCandle,
 } from "@/lib/trade-analysis";
 import { persistAnalysis, type PersistenceResult } from "@/lib/trade-journal";
+import { applyMacroFilter, getMacroSnapshot } from "@/lib/macro-calendar";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -136,8 +137,13 @@ export async function POST(request: Request) {
       maxMarginPercent: body.maxMarginPercent!,
       accountSize: body.accountSize!,
     };
-    const [market, fxRates] = await Promise.all([getMarket(input.instrument), getCzkFxRates()]);
-    const analysis = buildTradeAnalysis(input, market, fxRates);
+    const [market, fxRates, macroSnapshot] = await Promise.all([
+      getMarket(input.instrument),
+      getCzkFxRates(),
+      getMacroSnapshot(input.instrument, input.xtbPriceAt),
+    ]);
+    const technicalAnalysis = buildTradeAnalysis(input, market, fxRates);
+    const analysis = applyMacroFilter(technicalAnalysis, input, macroSnapshot);
     let persistence: PersistenceResult = { stored: false, analysisId: null };
     try {
       persistence = await persistAnalysis(input, analysis);
