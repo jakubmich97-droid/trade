@@ -50,6 +50,9 @@ function validate(body: Partial<AnalyzeRequest>): string | null {
   if (!Number.isFinite(body.riskPercent) || !body.riskPercent || body.riskPercent < 0.1 || body.riskPercent > 5) {
     return "Riziko musí být mezi 0,1 a 5 %.";
   }
+  if (!Number.isFinite(body.maxMarginPercent) || !body.maxMarginPercent || body.maxMarginPercent < 5 || body.maxMarginPercent > 100) {
+    return "Maximální využití marže musí být mezi 5 a 100 %.";
+  }
   if (!Number.isFinite(body.accountSize) || !body.accountSize || body.accountSize <= 0) return "Velikost účtu je povinná a musí být kladné číslo.";
   return null;
 }
@@ -130,6 +133,7 @@ export async function POST(request: Request) {
       xtbPrice: body.xtbPrice!,
       xtbPriceAt: body.xtbPriceAt!,
       riskPercent: body.riskPercent!,
+      maxMarginPercent: body.maxMarginPercent!,
       accountSize: body.accountSize!,
     };
     const [market, fxRates] = await Promise.all([getMarket(input.instrument), getCzkFxRates()]);

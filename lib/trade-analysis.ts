@@ -75,6 +75,16 @@ export interface TradeAnalysis {
     minimum_volume_lots: number;
     minimum_volume_risk_czk: number;
     risk_per_lot_czk: number;
+    risk_based_volume_lots: number;
+    max_margin_percent: number;
+    margin_budget_czk: number;
+    margin_based_volume_lots: number;
+    required_margin_czk: number | null;
+    required_margin_percent: number | null;
+    minimum_volume_margin_czk: number;
+    margin_per_lot_czk: number;
+    leverage: number;
+    limiting_factor: "RISK" | "MARGIN";
     contract_multiplier: number;
     quote_currency: "EUR" | "USD";
     conversion_rate_czk: number;
@@ -113,6 +123,7 @@ export interface AnalyzeRequest {
   xtbPriceAt: string;
   volume?: number;
   riskPercent: number;
+  maxMarginPercent: number;
   accountSize: number | null;
 }
 
@@ -126,11 +137,11 @@ interface Snapshot extends TimeframeReading {
 }
 
 const PRICE_DIGITS: Record<InstrumentId, number> = { DE40: 1, US100: 1, US500: 1, EURUSD: 5 };
-const CONTRACTS: Record<InstrumentId, { multiplier: number; quoteCurrency: "EUR" | "USD" }> = {
-  DE40: { multiplier: 25, quoteCurrency: "EUR" },
-  US100: { multiplier: 20, quoteCurrency: "USD" },
-  US500: { multiplier: 50, quoteCurrency: "USD" },
-  EURUSD: { multiplier: 100_000, quoteCurrency: "USD" },
+const CONTRACTS: Record<InstrumentId, { multiplier: number; quoteCurrency: "EUR" | "USD"; leverage: number }> = {
+  DE40: { multiplier: 25, quoteCurrency: "EUR", leverage: 20 },
+  US100: { multiplier: 20, quoteCurrency: "USD", leverage: 20 },
+  US500: { multiplier: 50, quoteCurrency: "USD", leverage: 20 },
+  EURUSD: { multiplier: 100_000, quoteCurrency: "USD", leverage: 30 },
 };
 const MINIMUM_VOLUME_LOTS = 0.01;
 
@@ -297,10 +308,17 @@ function buildPositionSizing(
   const riskPerLotCzk = Math.abs(entry - stop) * contract.multiplier * conversionRate;
   if (!Number.isFinite(riskPerLotCzk) || riskPerLotCzk <= 0) throw new Error("Riziko pozice se nepodařilo vypočítat.");
 
-  const rawVolume = targetRiskCzk / riskPerLotCzk;
+  const riskBasedVolume = targetRiskCzk / riskPerLotCzk;
+  const marginBudgetCzk = request.accountSize * request.maxMarginPercent / 100;
+  const marginPerLotCzk = entry * contract.multiplier * conversionRate / contract.leverage;
+  if (!Number.isFinite(marginPerLotCzk) || marginPerLotCzk <= 0) throw new Error("Požadovanou marži se nepodařilo vypočítat.");
+  const marginBasedVolume = marginBudgetCzk / marginPerLotCzk;
+  const limitingFactor = marginBasedVolume < riskBasedVolume ? "MARGIN" : "RISK";
+  const rawVolume = Math.min(riskBasedVolume, marginBasedVolume);
   const roundedVolume = Math.floor((rawVolume + Number.EPSILON) * 100) / 100;
   const recommendedVolume = roundedVolume >= MINIMUM_VOLUME_LOTS ? roundedVolume : null;
   const estimatedRiskCzk = recommendedVolume === null ? null : recommendedVolume * riskPerLotCzk;
+  const requiredMarginCzk = recommendedVolume === null ? null : recommendedVolume * marginPerLotCzk;
 
   return {
     account_size_czk: request.accountSize,
@@ -312,6 +330,16 @@ function buildPositionSizing(
     minimum_volume_lots: MINIMUM_VOLUME_LOTS,
     minimum_volume_risk_czk: MINIMUM_VOLUME_LOTS * riskPerLotCzk,
     risk_per_lot_czk: riskPerLotCzk,
+    risk_based_volume_lots: riskBasedVolume,
+    max_margin_percent: request.maxMarginPercent,
+    margin_budget_czk: marginBudgetCzk,
+    margin_based_volume_lots: marginBasedVolume,
+    required_margin_czk: requiredMarginCzk,
+    required_margin_percent: requiredMarginCzk === null ? null : requiredMarginCzk / request.accountSize * 100,
+    minimum_volume_margin_czk: MINIMUM_VOLUME_LOTS * marginPerLotCzk,
+    margin_per_lot_czk: marginPerLotCzk,
+    leverage: contract.leverage,
+    limiting_factor: limitingFactor,
     contract_multiplier: contract.multiplier,
     quote_currency: contract.quoteCurrency,
     conversion_rate_czk: conversionRate,

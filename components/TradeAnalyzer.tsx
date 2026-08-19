@@ -194,6 +194,7 @@ export function TradeAnalyzer() {
   const [xtbPrice, setXtbPrice] = useState("");
   const [xtbPriceAt, setXtbPriceAt] = useState(() => pragueNowInput());
   const [riskPercent, setRiskPercent] = useState(1);
+  const [maxMarginPercent, setMaxMarginPercent] = useState(30);
   const [accountSize, setAccountSize] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -249,6 +250,10 @@ export function TradeAnalyzer() {
     const size = Number(accountSize);
     return size > 0 ? Math.round(size * riskPercent / 100) : null;
   }, [accountSize, riskPercent]);
+  const estimatedMarginBudget = useMemo(() => {
+    const size = Number(accountSize);
+    return size > 0 ? Math.round(size * maxMarginPercent / 100) : null;
+  }, [accountSize, maxMarginPercent]);
 
   function saveHistory(nextAnalysis: TradeAnalysis) {
     const item: HistoryItem = {
@@ -282,6 +287,7 @@ export function TradeAnalyzer() {
           xtbPrice: parseLocalizedNumber(xtbPrice),
           xtbPriceAt: pragueInputToIso(xtbPriceAt),
           riskPercent,
+          maxMarginPercent,
           accountSize: Number(accountSize),
         }),
       });
@@ -572,7 +578,11 @@ export function TradeAnalyzer() {
               <span>Maximální riziko <em>lze změnit</em></span>
               <div className="suffix-input"><input type="number" min="0.1" max="5" step="0.1" value={riskPercent} onChange={(event) => setRiskPercent(Number(event.target.value))} /><b>%</b></div>
             </label>
-            {estimatedRisk !== null && <div className="risk-preview"><ShieldCheck size={16} /><span>Rizikový rozpočet při zásahu SL:</span><strong>{estimatedRisk.toLocaleString("cs-CZ")} Kč</strong><small>Doporučený objem se dopočítá z konkrétního stop-lossu po analýze.</small></div>}
+            <label className="field field--wide">
+              <span>Maximální využití marže <em>lze změnit · doporučeno 30 %</em></span>
+              <div className="suffix-input"><input type="number" min="5" max="100" step="5" value={maxMarginPercent} onChange={(event) => setMaxMarginPercent(Number(event.target.value))} /><b>%</b></div>
+            </label>
+            {estimatedRisk !== null && estimatedMarginBudget !== null && <div className="risk-preview"><ShieldCheck size={16} /><span>Limit ztráty při SL:</span><strong>{estimatedRisk.toLocaleString("cs-CZ")} Kč</strong><span className="risk-preview__divider">·</span><span>Maržový rozpočet:</span><strong>{estimatedMarginBudget.toLocaleString("cs-CZ")} Kč</strong><small>Objem se po analýze omezí přísnějším z obou limitů. Skutečnou marži vždy ověř v xStation.</small></div>}
           </div>
 
           <div className="rules-box">
@@ -586,7 +596,7 @@ export function TradeAnalyzer() {
           </div>
 
           {error && <div className="error-message"><AlertTriangle size={17} /><span>{error}</span></div>}
-          <button className="analyze-button" type="button" onClick={analyze} disabled={loading || !xtbPrice.trim() || !xtbPriceAt || Number(accountSize) <= 0 || riskPercent < 0.1 || riskPercent > 5}>
+          <button className="analyze-button" type="button" onClick={analyze} disabled={loading || !xtbPrice.trim() || !xtbPriceAt || Number(accountSize) <= 0 || riskPercent < 0.1 || riskPercent > 5 || maxMarginPercent < 5 || maxMarginPercent > 100}>
             {loading ? <><LoaderCircle className="spin" size={19} /> Stahuji a počítám 1 200 svíček…</> : <><Zap size={19} /> Načíst data a analyzovat <ArrowRight size={18} /></>}
           </button>
           <p className="button-note"><RefreshCw size={13} /> Data se při opakování obnoví nejvýše jednou za minutu.</p>
@@ -625,14 +635,16 @@ export function TradeAnalyzer() {
                 <div className={`position-sizing ${analysis.position_sizing.recommended_volume_lots === null ? "position-sizing--blocked" : ""}`}>
                   <div className="position-sizing__heading"><Gauge size={17} /><div><span>Doporučený objem</span><strong>{analysis.position_sizing.recommended_volume_lots === null ? "Obchod je pro tento limit příliš velký" : `${analysis.position_sizing.recommended_volume_lots.toLocaleString("cs-CZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} lot`}</strong></div></div>
                   {analysis.position_sizing.recommended_volume_lots === null ? (
-                    <p>Minimálních 0,01 lotu by znamenalo riziko přibližně {analysis.position_sizing.minimum_volume_risk_czk.toLocaleString("cs-CZ", { maximumFractionDigits: 0 })} Kč, což překračuje limit {analysis.position_sizing.target_risk_czk.toLocaleString("cs-CZ", { maximumFractionDigits: 0 })} Kč.</p>
+                    <p>Minimálních 0,01 lotu překračuje {analysis.position_sizing.limiting_factor === "MARGIN" ? `maržový rozpočet ${analysis.position_sizing.margin_budget_czk.toLocaleString("cs-CZ", { maximumFractionDigits: 0 })} Kč (potřeba přibližně ${analysis.position_sizing.minimum_volume_margin_czk.toLocaleString("cs-CZ", { maximumFractionDigits: 0 })} Kč)` : `rizikový limit ${analysis.position_sizing.target_risk_czk.toLocaleString("cs-CZ", { maximumFractionDigits: 0 })} Kč (riziko přibližně ${analysis.position_sizing.minimum_volume_risk_czk.toLocaleString("cs-CZ", { maximumFractionDigits: 0 })} Kč)`}.</p>
                   ) : (
                     <dl>
                       <div><dt>Limit rizika</dt><dd>{analysis.position_sizing.target_risk_czk.toLocaleString("cs-CZ", { maximumFractionDigits: 0 })} Kč · {analysis.position_sizing.target_risk_percent.toLocaleString("cs-CZ")} %</dd></div>
                       <div><dt>Odhad při SL</dt><dd>{analysis.position_sizing.estimated_risk_czk!.toLocaleString("cs-CZ", { maximumFractionDigits: 0 })} Kč · {analysis.position_sizing.estimated_risk_percent!.toLocaleString("cs-CZ", { maximumFractionDigits: 2 })} %</dd></div>
+                      {analysis.position_sizing.required_margin_czk !== undefined && analysis.position_sizing.required_margin_czk !== null && <div><dt>Požadovaná marže</dt><dd>{analysis.position_sizing.required_margin_czk.toLocaleString("cs-CZ", { maximumFractionDigits: 0 })} Kč · {analysis.position_sizing.required_margin_percent!.toLocaleString("cs-CZ", { maximumFractionDigits: 1 })} % účtu</dd></div>}
+                      {analysis.position_sizing.limiting_factor && <div><dt>Objem omezuje</dt><dd>{analysis.position_sizing.limiting_factor === "MARGIN" ? "Maržový rozpočet" : "Riziko k SL"}</dd></div>}
                     </dl>
                   )}
-                  <small>Násobitel XTB kontraktu {analysis.position_sizing.contract_multiplier.toLocaleString("cs-CZ")} · kurz {analysis.position_sizing.quote_currency}/CZK podle ECB {analysis.position_sizing.conversion_rate_czk.toLocaleString("cs-CZ", { maximumFractionDigits: 4 })} · {analysis.position_sizing.conversion_rate_at}</small>
+                  <small>Násobitel XTB kontraktu {analysis.position_sizing.contract_multiplier.toLocaleString("cs-CZ")}{analysis.position_sizing.leverage ? ` · páka 1:${analysis.position_sizing.leverage}` : " · starší výpočet bez kontroly marže"} · kurz {analysis.position_sizing.quote_currency}/CZK podle ECB {analysis.position_sizing.conversion_rate_czk.toLocaleString("cs-CZ", { maximumFractionDigits: 4 })} · {analysis.position_sizing.conversion_rate_at}</small>
                 </div>
               )}
               <div className="rr-row"><span>Risk / Reward</span><strong>{analysis.setup.risk_reward}</strong></div>
@@ -650,7 +662,7 @@ export function TradeAnalyzer() {
               {analysis.verdict !== "NO_TRADE" && <div className="time-stop"><Clock3 size={16} /><span><b>Časový stop:</b> {analysis.setup.time_stop_rule}</span></div>}
               {analysis.verdict !== "NO_TRADE" && (
                 <div className="trade-confirm">
-                  <div><Database size={16} /><span>{analysis.position_sizing?.recommended_volume_lots === null ? "Nastavený rizikový limit neumožňuje ani minimální objem 0,01 lotu. Uprav riziko a spusť analýzu znovu." : persistence?.stored ? "Analýza je uložená. Doporučený objem se do deníku zapíše až po tvém potvrzení vstupu." : "Analýza proběhla, ale databázový zápis se nepodařil."}</span></div>
+                  <div><Database size={16} /><span>{analysis.position_sizing?.recommended_volume_lots === null ? "Nastavený rizikový nebo maržový limit neumožňuje ani minimální objem 0,01 lotu. Uprav limity a spusť analýzu znovu." : persistence?.stored ? "Analýza je uložená. Doporučený objem se do deníku zapíše až po tvém potvrzení vstupu." : "Analýza proběhla, ale databázový zápis se nepodařil."}</span></div>
                   <div className="trade-decision-buttons">
                     <button type="button" className="trade-decision-enter" onClick={confirmLiveTrade} disabled={confirming || !persistence?.analysisId || tradeDecision === "entered" || !analysis.position_sizing?.recommended_volume_lots}>
                       {confirming ? <LoaderCircle className="spin" size={16} /> : <Check size={16} />} {tradeDecision === "entered" ? "Obchod zapsán" : "Ano, vstupuji"}
@@ -772,7 +784,7 @@ export function TradeAnalyzer() {
           <div className="section-heading"><div><span>Lokálně v tomto zařízení</span><h2>Poslední analýzy</h2></div><button onClick={() => { setHistory([]); localStorage.removeItem("tradelens-data-history"); }}><RotateCcw size={15} /> Vymazat historii</button></div>
           <div className="history-grid">
             {history.map((item) => (
-              <button className="history-card" key={item.id} onClick={() => { setAnalysis(item.analysis); window.setTimeout(() => resultRef.current?.scrollIntoView({ behavior: "smooth" }), 100); }}>
+              <button className="history-card" key={item.id} onClick={() => { setAnalysis(item.analysis); setPersistence(null); setTradeDecision(null); setConfirmNotice(""); window.setTimeout(() => resultRef.current?.scrollIntoView({ behavior: "smooth" }), 100); }}>
                 <span className={`history-verdict history-verdict--${item.verdict.toLowerCase()}`}>{verdictLabel(item.verdict)}</span>
                 <strong>{item.instrument}</strong><p>H1 · M15 · M5 · {new Date(item.createdAt).toLocaleString("cs-CZ")}</p>
                 <div><span>Síla filtru {item.confidence}%</span><ChevronRight size={17} /></div>

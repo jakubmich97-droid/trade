@@ -2,7 +2,7 @@ import "server-only";
 import { getSql } from "@/lib/db";
 import type { AnalyzeRequest, TradeAnalysis } from "@/lib/trade-analysis";
 
-export const STRATEGY_VERSION = "v1.3.0";
+export const STRATEGY_VERSION = "v1.4.0";
 
 export type ExitReason = "TP1" | "TP2" | "SL" | "BE" | "TIME_STOP" | "MANUAL";
 
@@ -131,7 +131,7 @@ export async function confirmLiveTrade(analysisId: string) {
       ${analysisId}, 'LIVE', ${stored.verdict}, ${input.xtbPriceAt}, ${levels.entry}, ${levels.stop},
       ${levels.tp1}, ${levels.tp2}, ${analysis.setup.holding_period_min_minutes}, ${analysis.setup.holding_period_max_minutes},
       ${recommendedVolume}, ${actualRiskPercent}, ${input.accountSize}, ${riskAmount},
-      ${`Uživatel potvrdil vstup; cílové riziko ${input.riskPercent} %, objem doporučen aplikací`}
+      ${`Uživatel potvrdil vstup; cílové riziko ${input.riskPercent} %, max. marže ${input.maxMarginPercent} %, objem doporučen aplikací`}
     )
     ON CONFLICT (analysis_id, mode)
     DO UPDATE SET analysis_id = EXCLUDED.analysis_id
