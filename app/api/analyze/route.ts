@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
-import { getRealTimeRates, type JsonItem } from "dukascopy-node";
+import {
+  BufferFetcher,
+  formatOutput,
+  generateUrls,
+  processData,
+  type JsonItem,
+} from "dukascopy-node";
 import {
   buildTradeAnalysis,
   type CzkFxRates,
@@ -22,10 +28,14 @@ const INSTRUMENTS = {
 } as const;
 
 const TIMEFRAMES = {
-  H1: { api: "h1", duration: 60 * 60 * 1000 },
-  M15: { api: "m15", duration: 15 * 60 * 1000 },
-  M5: { api: "m5", duration: 5 * 60 * 1000 },
+  H1: { duration: 60 * 60 * 1000 },
+  M15: { duration: 15 * 60 * 1000 },
+  M5: { duration: 5 * 60 * 1000 },
 } as const;
+
+const MINUTE_LOOKBACK_MS = 12 * 24 * 60 * 60_000;
+const HOURLY_LOOKBACK_MS = 45 * 24 * 60 * 60_000;
+const DUKASCOPY_RETRY_DELAYS_MS = [0, 1_000, 2_000, 4_000, 8_000] as const;
 
 interface CacheEntry {
   expiresAt: number;
@@ -34,6 +44,7 @@ interface CacheEntry {
 }
 
 const marketCache = new Map<InstrumentId, CacheEntry>();
+const marketRequests = new Map<InstrumentId, Promise<CacheEntry>>();
 let fxCache: { expiresAt: number; rates: CzkFxRates } | null = null;
 
 const REFERENCE_MAX_AGE_MS = {
@@ -110,26 +121,6 @@ function quoteFromRows(
   return { price: lastClosed.close, timestamp, timeframe };
 }
 
-async function fetchM1ReferenceQuote(instrument: InstrumentId): Promise<MarketReferenceQuote | null> {
-  for (const last of [10, 60]) {
-    try {
-      const rows = await getRealTimeRates({
-        instrument: INSTRUMENTS[instrument],
-        timeframe: "m1",
-        format: "json",
-        last,
-        volumes: false,
-        priceType: "bid",
-      });
-      const quote = quoteFromRows(rows as JsonItem[], "M1", 60_000, REFERENCE_MAX_AGE_MS.M1);
-      if (quote) return quote;
-    } catch (error) {
-      console.warn("Dukascopy M1 reference attempt failed", { instrument, last, error: String(error) });
-    }
-  }
-  return null;
-}
-
 function quoteFromMarketCandles(
   candles: MarketCandle[],
   timeframe: "M5" | "H1",
@@ -204,19 +195,81 @@ async function getCzkFxRates(): Promise<CzkFxRates> {
   return rates;
 }
 
-async function fetchCandles(instrument: InstrumentId, timeframe: AnalysisTimeframe): Promise<MarketCandle[]> {
-  const config = TIMEFRAMES[timeframe];
-  const rows = await getRealTimeRates({
-    instrument: INSTRUMENTS[instrument],
-    timeframe: config.api,
-    format: "json",
-    last: 405,
-    volumes: true,
+async function fetchDukascopyBuffer(url: string, instrument: InstrumentId, timeframe: "m1" | "h1") {
+  let lastStatus = 0;
+  for (const [attempt, delayMs] of DUKASCOPY_RETRY_DELAYS_MS.entries()) {
+    if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
+    const response = await fetch(url, {
+      cache: "no-store",
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "TradeLensData/1.0",
+      },
+    });
+    lastStatus = response.status;
+    if (response.ok) return Buffer.from(await response.arrayBuffer());
+    await response.arrayBuffer();
+    if (response.status !== 429) throw new Error(`Dukascopy ${timeframe} data vrátila HTTP ${response.status}.`);
+    console.warn("Dukascopy data rate limited", {
+      instrument,
+      timeframe,
+      retryInMs: DUKASCOPY_RETRY_DELAYS_MS[attempt + 1] ?? null,
+    });
+  }
+  throw new Error(`Dukascopy ${timeframe} data vrátila HTTP ${lastStatus}.`);
+}
+
+async function fetchRows(
+  instrument: InstrumentId,
+  timeframe: "m1" | "h1",
+  lookbackMs: number,
+): Promise<JsonItem[]> {
+  const sourceInstrument = INSTRUMENTS[instrument];
+  const to = new Date();
+  const from = new Date(to.getTime() - lookbackMs);
+  const urls = generateUrls({
+    instrument: sourceInstrument,
+    timeframe,
     priceType: "bid",
+    startDate: from,
+    endDate: to,
   });
+  const fetcher = new BufferFetcher({
+    batchSize: 1,
+    pauseBetweenBatchesMs: 100,
+    fetcherFn: (url) => fetchDukascopyBuffer(url, instrument, timeframe),
+  });
+  const bufferObjects = await fetcher.fetch(urls);
+  const processedData = processData({
+    instrument: sourceInstrument,
+    requestedTimeframe: timeframe,
+    bufferObjects,
+    priceType: "bid",
+    volumes: true,
+    volumeUnits: "millions",
+    ignoreFlats: true,
+  });
+  return formatOutput({ processedData, timeframe, format: "json" })
+    .filter((row) => row.timestamp >= from.getTime() && row.timestamp < to.getTime());
+}
+
+function isValidRow(row: JsonItem) {
+  return Number.isFinite(row.timestamp)
+    && Number.isFinite(row.open)
+    && Number.isFinite(row.high)
+    && Number.isFinite(row.low)
+    && Number.isFinite(row.close)
+    && row.open > 0
+    && row.high > 0
+    && row.low > 0
+    && row.close > 0;
+}
+
+function rowsToCandles(rows: JsonItem[], duration: number): MarketCandle[] {
   const now = Date.now();
-  return (rows as JsonItem[])
-    .filter((row) => row.timestamp + config.duration <= now)
+  return rows
+    .filter(isValidRow)
+    .filter((row) => row.timestamp + duration <= now)
     .slice(-400)
     .map((row) => ({
       timestamp: row.timestamp,
@@ -228,22 +281,59 @@ async function fetchCandles(instrument: InstrumentId, timeframe: AnalysisTimefra
     }));
 }
 
-async function getMarketData(instrument: InstrumentId) {
-  const cached = marketCache.get(instrument);
-  if (cached && cached.expiresAt > Date.now()) return cached;
+function aggregateMinuteRows(rows: JsonItem[], duration: number): MarketCandle[] {
+  const grouped = new Map<number, MarketCandle>();
+  const sortedRows = rows.filter(isValidRow).sort((a, b) => a.timestamp - b.timestamp);
+  for (const row of sortedRows) {
+    const timestamp = Math.floor(row.timestamp / duration) * duration;
+    const current = grouped.get(timestamp);
+    if (!current) {
+      grouped.set(timestamp, {
+        timestamp,
+        open: row.open,
+        high: row.high,
+        low: row.low,
+        close: row.close,
+        volume: row.volume ?? 0,
+      });
+      continue;
+    }
+    current.high = Math.max(current.high, row.high);
+    current.low = Math.min(current.low, row.low);
+    current.close = row.close;
+    current.volume += row.volume ?? 0;
+  }
+  const now = Date.now();
+  return Array.from(grouped.values())
+    .filter((candle) => candle.timestamp + duration <= now)
+    .slice(-400);
+}
 
-  const [H1, M15, M5, m1Quote] = await Promise.all([
-    fetchCandles(instrument, "H1"),
-    fetchCandles(instrument, "M15"),
-    fetchCandles(instrument, "M5"),
-    fetchM1ReferenceQuote(instrument),
+async function loadMarketData(instrument: InstrumentId): Promise<CacheEntry> {
+  const [minuteRows, hourRows] = await Promise.all([
+    fetchRows(instrument, "m1", MINUTE_LOOKBACK_MS),
+    fetchRows(instrument, "h1", HOURLY_LOOKBACK_MS),
   ]);
+  const H1 = rowsToCandles(hourRows, TIMEFRAMES.H1.duration);
+  const M15 = aggregateMinuteRows(minuteRows, TIMEFRAMES.M15.duration);
+  const M5 = aggregateMinuteRows(minuteRows, TIMEFRAMES.M5.duration);
+  const m1Quote = quoteFromRows(minuteRows, "M1", 60_000, REFERENCE_MAX_AGE_MS.M1);
   const market = { H1, M15, M5 };
   assertMarketFreshness(instrument, market);
   const referenceQuote = resolveReferenceQuote(instrument, market, m1Quote);
   const entry = { market, referenceQuote, expiresAt: Date.now() + 60_000 };
   marketCache.set(instrument, entry);
   return entry;
+}
+
+async function getMarketData(instrument: InstrumentId) {
+  const cached = marketCache.get(instrument);
+  if (cached && cached.expiresAt > Date.now()) return cached;
+  const pending = marketRequests.get(instrument);
+  if (pending) return pending;
+  const request = loadMarketData(instrument).finally(() => marketRequests.delete(instrument));
+  marketRequests.set(instrument, request);
+  return request;
 }
 
 export async function POST(request: Request) {
