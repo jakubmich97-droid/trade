@@ -579,7 +579,7 @@ export function TradeAnalyzer() {
               <div className="suffix-input"><input type="number" min="0.1" max="5" step="0.1" value={riskPercent} onChange={(event) => setRiskPercent(Number(event.target.value))} /><b>%</b></div>
             </label>
             <label className="field field--wide">
-              <span>Maximální využití marže <em>lze změnit · doporučeno 30 %</em></span>
+              <span>Maximální využití marže <em>lze změnit · doporučeno 5 %</em></span>
               <div className="suffix-input"><input type="number" min="5" max="100" step="5" value={maxMarginPercent} onChange={(event) => setMaxMarginPercent(Number(event.target.value))} /><b>%</b></div>
             </label>
             {estimatedRisk !== null && estimatedMarginBudget !== null && <div className="risk-preview"><ShieldCheck size={16} /><span>Limit ztráty při SL:</span><strong>{estimatedRisk.toLocaleString("cs-CZ")} Kč</strong><span className="risk-preview__divider">·</span><span>Maržový rozpočet:</span><strong>{estimatedMarginBudget.toLocaleString("cs-CZ")} Kč</strong><small>Objem se po analýze omezí přísnějším z obou limitů. Skutečnou marži vždy ověř v xStation.</small></div>}
