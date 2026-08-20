@@ -22,7 +22,7 @@ export interface MarketCandle {
 export interface MarketReferenceQuote {
   price: number;
   timestamp: number;
-  timeframe: "M1";
+  timeframe: "M1" | "M5" | "H1";
 }
 
 export interface IndicatorReading {
@@ -115,8 +115,8 @@ export interface TradeAnalysis {
     source_price: number;
     reference_price: number;
     reference_price_at: string;
-    reference_timeframe: "M1";
-    /** Legacy database compatibility fields; the value now comes from Dukascopy M1. */
+    reference_timeframe: "M1" | "M5" | "H1";
+    /** Legacy database compatibility fields; the value now comes from the freshest safe Dukascopy reference. */
     xtb_price: number;
     xtb_price_at: string;
     price_offset: number;
@@ -221,6 +221,81 @@ function formatDistance(instrument: InstrumentId, priceDistance: number) {
   const value = distanceValue(instrument, priceDistance);
   const rendered = value.toLocaleString("cs-CZ", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   return `${rendered} ${instrument === "EURUSD" ? "pipů" : "bodů"}`;
+}
+
+function roundPrice(instrument: InstrumentId, value: number) {
+  return Number(value.toFixed(PRICE_DIGITS[instrument]));
+}
+
+export function rebaseTradeAnalysis(
+  analysis: TradeAnalysis,
+  actualEntryPrice: number,
+  actualEntryAt = new Date().toISOString(),
+): TradeAnalysis {
+  if (analysis.verdict === "NO_TRADE") throw new Error("NO TRADE nemá cenové úrovně k přepočtu.");
+  if (!Number.isFinite(actualEntryPrice) || actualEntryPrice <= 0) throw new Error("Aktuální cena z XTB musí být kladné číslo.");
+  if (!Number.isFinite(Date.parse(actualEntryAt))) throw new Error("Čas aktuální ceny z XTB není platný.");
+
+  const instrument = analysis.detected.instrument;
+  const { stop_loss_distance: stopDistance, take_profit_1_distance: tp1Distance, take_profit_2_distance: tp2Distance } = analysis.setup;
+  if (stopDistance === null || tp1Distance === null || tp2Distance === null) {
+    throw new Error("Analýza nemá kompletní vzdálenosti SL a TP.");
+  }
+
+  const unitSize = DISTANCE_SIZE[instrument];
+  const direction = analysis.verdict === "LONG" ? 1 : -1;
+  const entry = roundPrice(instrument, actualEntryPrice);
+  const stop = roundPrice(instrument, entry - direction * stopDistance * unitSize);
+  const tp1 = roundPrice(instrument, entry + direction * tp1Distance * unitSize);
+  const tp2 = roundPrice(instrument, entry + direction * tp2Distance * unitSize);
+  const sizing = analysis.position_sizing;
+  let rebasedSizing = sizing;
+
+  if (sizing) {
+    const marginPerLotCzk = entry * sizing.contract_multiplier * sizing.conversion_rate_czk / sizing.leverage;
+    const marginBasedVolume = sizing.margin_budget_czk / marginPerLotCzk;
+    const limitingFactor = marginBasedVolume < sizing.risk_based_volume_lots ? "MARGIN" : "RISK";
+    const rawVolume = Math.min(sizing.risk_based_volume_lots, marginBasedVolume);
+    const roundedVolume = Math.floor((rawVolume + Number.EPSILON) * 100) / 100;
+    const recommendedVolume = roundedVolume >= sizing.minimum_volume_lots ? roundedVolume : null;
+    const estimatedRiskCzk = recommendedVolume === null ? null : recommendedVolume * sizing.risk_per_lot_czk;
+    const requiredMarginCzk = recommendedVolume === null ? null : recommendedVolume * marginPerLotCzk;
+    rebasedSizing = {
+      ...sizing,
+      recommended_volume_lots: recommendedVolume,
+      estimated_risk_czk: estimatedRiskCzk,
+      estimated_risk_percent: estimatedRiskCzk === null ? null : estimatedRiskCzk / sizing.account_size_czk * 100,
+      margin_based_volume_lots: marginBasedVolume,
+      required_margin_czk: requiredMarginCzk,
+      required_margin_percent: requiredMarginCzk === null ? null : requiredMarginCzk / sizing.account_size_czk * 100,
+      minimum_volume_margin_czk: sizing.minimum_volume_lots * marginPerLotCzk,
+      margin_per_lot_czk: marginPerLotCzk,
+      limiting_factor: limitingFactor,
+    };
+  }
+
+  const distanceLabel = analysis.setup.distance_unit === "PIP" ? "pipů" : "bodů";
+  return {
+    ...analysis,
+    setup: {
+      ...analysis.setup,
+      entry_zone: `XTB vstup ${formatPrice(instrument, entry)}`,
+      entry_price: entry,
+      stop_loss: `${formatPrice(instrument, stop)} (${stopDistance.toLocaleString("cs-CZ", { maximumFractionDigits: 1 })} ${distanceLabel} proti směru)`,
+      stop_loss_price: stop,
+      take_profit_1: `${formatPrice(instrument, tp1)} (${tp1Distance.toLocaleString("cs-CZ", { maximumFractionDigits: 1 })} ${distanceLabel} ve směru)`,
+      take_profit_1_price: tp1,
+      take_profit_2: `${formatPrice(instrument, tp2)} (${tp2Distance.toLocaleString("cs-CZ", { maximumFractionDigits: 1 })} ${distanceLabel} ve směru)`,
+      take_profit_2_price: tp2,
+    },
+    position_sizing: rebasedSizing,
+    data: {
+      ...analysis.data,
+      xtb_price: entry,
+      xtb_price_at: actualEntryAt,
+      price_offset: entry - analysis.data.reference_price,
+    },
+  };
 }
 
 function signalFromScore(score: number): Signal {

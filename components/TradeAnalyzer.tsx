@@ -25,7 +25,7 @@ import {
   Zap,
 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import type { InstrumentId, Signal, TradeAnalysis, Verdict } from "@/lib/trade-analysis";
+import { rebaseTradeAnalysis, type InstrumentId, type Signal, type TradeAnalysis, type Verdict } from "@/lib/trade-analysis";
 
 const INSTRUMENTS: Array<{ id: InstrumentId; name: string; description: string }> = [
   { id: "DE40", name: "DE40", description: "Germany 40 / DAX" },
@@ -195,6 +195,9 @@ export function TradeAnalyzer() {
   const [confirming, setConfirming] = useState(false);
   const [confirmNotice, setConfirmNotice] = useState("");
   const [tradeDecision, setTradeDecision] = useState<"entered" | "skipped" | null>(null);
+  const [xtbExecutionPrice, setXtbExecutionPrice] = useState("");
+  const [appliedExecutionPrice, setAppliedExecutionPrice] = useState<{ price: number; at: string } | null>(null);
+  const [repriceNotice, setRepriceNotice] = useState("");
   const [stats, setStats] = useState<StatsState | null>(null);
   const [journal, setJournal] = useState<TradeJournalItem[]>([]);
   const [journalError, setJournalError] = useState("");
@@ -245,6 +248,8 @@ export function TradeAnalyzer() {
     const size = Number(accountSize);
     return size > 0 ? Math.round(size * maxMarginPercent / 100) : null;
   }, [accountSize, maxMarginPercent]);
+  const executionPriceDirty = appliedExecutionPrice !== null
+    && parseLocalizedNumber(xtbExecutionPrice) !== appliedExecutionPrice.price;
 
   function saveHistory(nextAnalysis: TradeAnalysis) {
     const item: HistoryItem = {
@@ -269,6 +274,9 @@ export function TradeAnalyzer() {
     setPersistence(null);
     setConfirmNotice("");
     setTradeDecision(null);
+    setXtbExecutionPrice("");
+    setAppliedExecutionPrice(null);
+    setRepriceNotice("");
     try {
       const response = await fetch("/api/analyze", {
         method: "POST",
@@ -294,6 +302,25 @@ export function TradeAnalyzer() {
     }
   }
 
+  function repriceFromXtb() {
+    if (!analysis || analysis.verdict === "NO_TRADE") return;
+    const price = parseLocalizedNumber(xtbExecutionPrice);
+    if (!Number.isFinite(price) || price <= 0) {
+      setRepriceNotice("Zadej platnou kladnou cenu z XTB.");
+      return;
+    }
+    try {
+      const at = new Date().toISOString();
+      const repriced = rebaseTradeAnalysis(analysis, price, at);
+      setAnalysis(repriced);
+      setAppliedExecutionPrice({ price: repriced.data.xtb_price, at });
+      setXtbExecutionPrice(String(repriced.data.xtb_price));
+      setRepriceNotice("Úrovně, objem a marže jsou přepočítané podle ceny z XTB.");
+    } catch (repriceError) {
+      setRepriceNotice(repriceError instanceof Error ? repriceError.message : "Cenové úrovně se nepodařilo přepočítat.");
+    }
+  }
+
   async function confirmLiveTrade() {
     if (!persistence?.analysisId) return;
     setConfirming(true);
@@ -302,7 +329,11 @@ export function TradeAnalyzer() {
       const response = await fetch("/api/trades/confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ analysisId: persistence.analysisId }),
+        body: JSON.stringify({
+          analysisId: persistence.analysisId,
+          executionPrice: appliedExecutionPrice?.price,
+          executionPriceAt: appliedExecutionPrice?.at,
+        }),
       });
       const payload = (await response.json()) as { saved?: boolean; error?: string };
       if (!response.ok || !payload.saved) throw new Error(payload.error || "Obchod se nepodařilo uložit.");
@@ -547,7 +578,7 @@ export function TradeAnalyzer() {
 
         <div className="panel settings-panel">
           <div className="panel__heading">
-            <div><span className="step">02</span><div><h2>Nastavení obchodu</h2><p>Cena a její čas se načtou automaticky z poslední uzavřené M1 svíčky Dukascopy.</p></div></div>
+            <div><span className="step">02</span><div><h2>Nastavení obchodu</h2><p>Cena a její čas se načtou z nejčerstvější bezpečné reference Dukascopy. Preferujeme M1, případně čerstvou M5 nebo H1.</p></div></div>
           </div>
 
           <div className="form-grid">
@@ -580,7 +611,7 @@ export function TradeAnalyzer() {
           <button className="analyze-button" type="button" onClick={analyze} disabled={loading || Number(accountSize) <= 0 || riskPercent < 0.1 || riskPercent > 5 || maxMarginPercent < 5 || maxMarginPercent > 100}>
             {loading ? <><LoaderCircle className="spin" size={19} /> Stahuji svíčky a referenční cenu…</> : <><Zap size={19} /> Načíst data a analyzovat <ArrowRight size={18} /></>}
           </button>
-          <p className="button-note"><RefreshCw size={13} /> Reference je z Dukascopy M1; SL a TP se zobrazí jako vzdálenosti v pipech nebo bodech.</p>
+          <p className="button-note"><RefreshCw size={13} /> Použitý timeframe reference vždy uvidíš ve výsledku; zastaralá data aplikace odmítne.</p>
         </div>
       </section>
 
@@ -588,7 +619,7 @@ export function TradeAnalyzer() {
         <section ref={resultRef} className={`result result--${analysis.verdict.toLowerCase()}`}>
           <div className="result__top">
             <div>
-              <span className="result-kicker"><Database size={15} /> {analysis.detected.instrument} · Dukascopy M1 {formatJournalPrice(analysis.detected.instrument, analysis.data.reference_price ?? analysis.data.source_price)} · {formatPragueTime(analysis.data.reference_price_at ?? analysis.data.last_updated)}</span>
+              <span className="result-kicker"><Database size={15} /> {analysis.detected.instrument} · Dukascopy {analysis.data.reference_timeframe} {formatJournalPrice(analysis.detected.instrument, analysis.data.reference_price ?? analysis.data.source_price)} · {formatPragueTime(analysis.data.reference_price_at ?? analysis.data.last_updated)}</span>
               <div className="verdict-line">
                 <span className="verdict-icon">{analysis.verdict === "LONG" ? <ArrowUpRight /> : analysis.verdict === "SHORT" ? <ArrowDownRight /> : <X />}</span>
                 <div><small>Verdikt</small><h2>{verdictLabel(analysis.verdict)}</h2></div>
@@ -611,6 +642,29 @@ export function TradeAnalyzer() {
               <SetupField label="Stop-loss" value={analysis.setup.stop_loss} />
               <SetupField label="Take-profit 1" value={analysis.setup.take_profit_1} />
               <SetupField label="Take-profit 2" value={analysis.setup.take_profit_2} />
+              {analysis.verdict !== "NO_TRADE" && (
+                <div className="execution-reprice">
+                  <div className="execution-reprice__heading"><RefreshCw size={16} /><div><strong>Přepočet podle XTB</strong><span>Zadej aktuální cenu až po analýze</span></div></div>
+                  <div className="execution-reprice__controls">
+                    <label>
+                      <span className="sr-only">Aktuální cena v XTB</span>
+                      <input
+                        aria-label="Aktuální cena v XTB"
+                        inputMode="decimal"
+                        placeholder="Aktuální cena v XTB"
+                        value={xtbExecutionPrice}
+                        onChange={(event) => {
+                          setXtbExecutionPrice(event.target.value);
+                          setRepriceNotice(appliedExecutionPrice ? "Cena se změnila. Pro nové úrovně spusť přepočet znovu." : "");
+                        }}
+                      />
+                      <b>{analysis.detected.instrument === "DE40" || analysis.detected.instrument === "EURUSD" ? "EUR" : "USD"}</b>
+                    </label>
+                    <button type="button" onClick={repriceFromXtb}><RefreshCw size={14} /> Přepočítat SL, TP a objem</button>
+                  </div>
+                  <small className={appliedExecutionPrice && !executionPriceDirty ? "execution-reprice__success" : ""}>{repriceNotice || "Technický signál a vzdálenosti zůstanou stejné; změní se absolutní ceny a maržový výpočet."}</small>
+                </div>
+              )}
               <SetupField label="Doporučená doba" value={analysis.setup.holding_period} accent={analysis.verdict !== "NO_TRADE"} />
               {analysis.verdict !== "NO_TRADE" && analysis.position_sizing && (
                 <div className={`position-sizing ${analysis.position_sizing.recommended_volume_lots === null ? "position-sizing--blocked" : ""}`}>
@@ -645,7 +699,7 @@ export function TradeAnalyzer() {
                 <div className="trade-confirm">
                   <div><Database size={16} /><span>{analysis.position_sizing?.recommended_volume_lots === null ? "Nastavený rizikový nebo maržový limit neumožňuje ani minimální objem 0,01 lotu. Uprav limity a spusť analýzu znovu." : persistence?.stored ? "Analýza je uložená. Doporučený objem se do deníku zapíše až po tvém potvrzení vstupu." : "Analýza proběhla, ale databázový zápis se nepodařil."}</span></div>
                   <div className="trade-decision-buttons">
-                    <button type="button" className="trade-decision-enter" onClick={confirmLiveTrade} disabled={confirming || !persistence?.analysisId || tradeDecision === "entered" || !analysis.position_sizing?.recommended_volume_lots}>
+                    <button type="button" className="trade-decision-enter" onClick={confirmLiveTrade} disabled={confirming || !persistence?.analysisId || tradeDecision === "entered" || !analysis.position_sizing?.recommended_volume_lots || executionPriceDirty}>
                       {confirming ? <LoaderCircle className="spin" size={16} /> : <Check size={16} />} {tradeDecision === "entered" ? "Obchod zapsán" : "Ano, vstupuji"}
                     </button>
                     <button type="button" className="trade-decision-skip" onClick={skipTrade} disabled={confirming || tradeDecision === "entered"}>

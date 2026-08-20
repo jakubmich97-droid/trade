@@ -1,8 +1,8 @@
 import "server-only";
 import { getSql } from "@/lib/db";
-import type { AnalyzeRequest, TradeAnalysis } from "@/lib/trade-analysis";
+import { rebaseTradeAnalysis, type AnalyzeRequest, type TradeAnalysis } from "@/lib/trade-analysis";
 
-export const STRATEGY_VERSION = "v1.7.0";
+export const STRATEGY_VERSION = "v1.8.0";
 
 export type ExitReason = "TP1" | "TP2" | "SL" | "BE" | "TIME_STOP" | "MANUAL";
 
@@ -97,7 +97,7 @@ export async function persistAnalysis(input: AnalyzeRequest, analysis: TradeAnal
   return { stored: true, analysisId };
 }
 
-export async function confirmLiveTrade(analysisId: string) {
+export async function confirmLiveTrade(analysisId: string, execution?: { price: number; at: string }) {
   const sql = getSql();
   const rows = await sql`
     SELECT id, verdict, raw_analysis
@@ -110,8 +110,20 @@ export async function confirmLiveTrade(analysisId: string) {
   if (!stored) throw new Error("Uložená analýza nebyla nalezena.");
   if (stored.verdict === "NO_TRADE") throw new Error("NO TRADE nelze označit jako otevřený obchod.");
 
-  const analysis = stored.raw_analysis.analysis;
+  const analysis = execution
+    ? rebaseTradeAnalysis(stored.raw_analysis.analysis, execution.price, execution.at)
+    : stored.raw_analysis.analysis;
   const input = stored.raw_analysis.request;
+  if (execution) {
+    await sql`
+      UPDATE analyses
+      SET xtb_price = ${analysis.data.xtb_price},
+          xtb_price_at = ${analysis.data.xtb_price_at},
+          price_offset = ${analysis.data.price_offset},
+          raw_analysis = ${JSON.stringify({ analysis, request: input })}::jsonb
+      WHERE id = ${analysisId}
+    `;
+  }
   const levels = tradeLevels(analysis);
   const sizing = analysis.position_sizing;
   const recommendedVolume = sizing?.recommended_volume_lots ?? input.volume ?? null;
@@ -127,10 +139,12 @@ export async function confirmLiveTrade(analysisId: string) {
       position_size, risk_percent, account_size_czk, risk_amount_czk,
       note
     ) VALUES (
-      ${analysisId}, 'LIVE', ${stored.verdict}, ${analysis.data.reference_price_at}, ${levels.entry}, ${levels.stop},
+      ${analysisId}, 'LIVE', ${stored.verdict}, ${analysis.data.xtb_price_at}, ${levels.entry}, ${levels.stop},
       ${levels.tp1}, ${levels.tp2}, ${analysis.setup.holding_period_min_minutes}, ${analysis.setup.holding_period_max_minutes},
       ${recommendedVolume}, ${actualRiskPercent}, ${input.accountSize}, ${riskAmount},
-      ${`Uživatel potvrdil vstup podle reference Dukascopy M1; cílové riziko ${input.riskPercent} %, max. marže ${input.maxMarginPercent} %, objem doporučen aplikací`}
+      ${execution
+        ? `Uživatel zadal aktuální cenu XTB a přepočítal SL, TP, objem a marži; původní reference Dukascopy ${analysis.data.reference_timeframe}, cílové riziko ${input.riskPercent} %, max. marže ${input.maxMarginPercent} %`
+        : `Uživatel potvrdil vstup podle reference Dukascopy ${analysis.data.reference_timeframe}; cílové riziko ${input.riskPercent} %, max. marže ${input.maxMarginPercent} %, objem doporučen aplikací`}
     )
     ON CONFLICT (analysis_id, mode)
     DO UPDATE SET analysis_id = EXCLUDED.analysis_id

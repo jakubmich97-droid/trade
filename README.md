@@ -17,9 +17,11 @@ Při každém spuštění se načte až 400 uzavřených svíček pro každý ti
 - M15 hledá obchodní setup
 - M5 potvrzuje vstupní trigger
 
-Pravidlový engine počítá EMA 20/50/200, RSI 14, ATR 14 a price action posledních svíček. LONG nebo SHORT vrátí pouze při silné shodě všech tří timeframe; jinak zůstává NO TRADE. U NO TRADE doporučí další vhodný čas analýzy podle timeframe, který vstup blokuje. Referenční cenu a čas načítá automaticky z poslední uzavřené M1 svíčky stejného feedu Dukascopy. Aktivní signál obsahuje také odhad doporučené doby držení a časový stop odvozený z ATR na M15.
+Pravidlový engine počítá EMA 20/50/200, RSI 14, ATR 14 a price action posledních svíček. LONG nebo SHORT vrátí pouze při silné shodě všech tří timeframe; jinak zůstává NO TRADE. U NO TRADE doporučí další vhodný čas analýzy podle timeframe, který vstup blokuje. Referenční cenu a čas načítá automaticky ze stejného feedu Dukascopy: preferuje čerstvou uzavřenou M1 svíčku a bezpečně přechází na čerstvou M5 nebo H1, pokud kratší timeframe není dostupný. Zastaralou referenci odmítne. Aktivní signál obsahuje také odhad doporučené doby držení a časový stop odvozený z ATR na M15.
 
 SL a TP se uživateli zobrazují jako vzdálenost od vstupu: pro EUR/USD v pipech (1 pip = 0,0001) a pro indexy v cenových bodech (1 bod = pohyb ceny o 1,0). Absolutní úrovně zůstávají uložené interně pro výpočet doporučeného objemu a vyhodnocování obchodního deníku. V XTB se vzdálenosti aplikují od skutečné exekuční ceny, čímž se eliminuje praktický dopad rozdílné absolutní kotace obou CFD feedů.
+
+Po aktivním výsledku lze zadat aktuální cenu z XTB a přepočítat absolutní vstup, SL, TP1, TP2, doporučený objem a marži. Při následném potvrzení vstupu se přepočítané hodnoty i čas ceny uloží do Neonu; původní technický verdikt a vzdálenosti v pipech/bodech se nemění.
 
 Po zadání velikosti korunového účtu, upravitelného rizikového limitu a maximálního využití marže aplikace dopočítá doporučený objem podle vzdálenosti vstupu od stop-lossu, aktuální specifikace XTB kontraktu, retailové páky a referenčního kurzu ECB. Použije přísnější z limitu ztráty při SL a maržového rozpočtu; velikost účtu je předvyplněná na 200 000 Kč a maržový limit na konzervativních 5 %, přičemž obě hodnoty lze změnit. Objem zaokrouhluje dolů na krok 0,01 lotu. Pokud by už minimální objem překročil některý z limitů, vstup nepovolí. Skutečná marže v xStation se může lišit podle podmínek konkrétního účtu a je rozhodující.
 

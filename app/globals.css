@@ -192,6 +192,21 @@ a { color: inherit; text-decoration: none; }
 .setup-field span, .rr-row span { color: var(--muted); font-size: 10px; }
 .setup-field strong { color: #ccded6; font-size: 11px; font-weight: 600; line-height: 1.45; }
 .setup-field--accent strong { color: var(--green); }
+.execution-reprice { margin: 10px 0 12px; padding: 12px; border: 1px solid rgba(106,169,255,.18); background: rgba(106,169,255,.045); border-radius: 11px; }
+.execution-reprice__heading { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 9px; }
+.execution-reprice__heading > svg { color: var(--blue); flex: 0 0 auto; margin-top: 1px; }
+.execution-reprice__heading > div { display: flex; flex-direction: column; gap: 2px; }
+.execution-reprice__heading strong { color: #d6e7ff; font-size: 11px; }
+.execution-reprice__heading span { color: #7890aa; font-size: 8px; }
+.execution-reprice__controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.execution-reprice__controls label { position: relative; min-width: 0; }
+.execution-reprice__controls input { width: 100%; height: 38px; padding: 0 48px 0 10px; color: var(--text); border: 1px solid var(--line); background: rgba(2,10,7,.48); border-radius: 9px; outline: none; }
+.execution-reprice__controls input:focus { border-color: rgba(106,169,255,.45); box-shadow: 0 0 0 3px rgba(106,169,255,.06); }
+.execution-reprice__controls label b { position: absolute; right: 10px; top: 13px; color: #7890aa; font-size: 8px; }
+.execution-reprice__controls button { min-height: 38px; padding: 0 11px; border: 1px solid rgba(106,169,255,.25); background: rgba(106,169,255,.09); color: #d6e7ff; border-radius: 9px; cursor: pointer; font-size: 9px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.execution-reprice__controls button:hover { background: rgba(106,169,255,.15); }
+.execution-reprice > small { display: block; margin-top: 8px; color: #748a80; font-size: 8px; line-height: 1.45; }
+.execution-reprice > small.execution-reprice__success { color: var(--green); }
 .rr-row { margin-top: 3px; border-radius: 9px; padding: 10px 11px; background: rgba(66,245,164,.05); border: 1px solid rgba(66,245,164,.11); display: flex; justify-content: space-between; gap: 12px; align-items: center; }
 .rr-row strong { color: var(--green); font-size: 11px; text-align: right; }
 .position-sizing { margin: 8px 0 11px; padding: 13px; border: 1px solid rgba(66,245,164,.2); border-radius: 11px; background: rgba(66,245,164,.055); }
@@ -373,6 +388,7 @@ footer p { color: #587065; font-size: 10px; }
   .confidence strong { font-size: 14px; }
   .setup-field { grid-template-columns: 92px 1fr; }
   .position-sizing dl { grid-template-columns: 1fr; }
+  .execution-reprice__controls { grid-template-columns: 1fr; }
   .history-section { padding: 18px; }
   .performance-section { padding: 18px; }
   .journal-section { padding: 18px; }
