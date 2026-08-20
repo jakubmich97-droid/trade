@@ -19,6 +19,12 @@ export interface MarketCandle {
   volume: number;
 }
 
+export interface MarketReferenceQuote {
+  price: number;
+  timestamp: number;
+  timeframe: "M1";
+}
+
 export interface IndicatorReading {
   name: string;
   reading: string;
@@ -56,6 +62,10 @@ export interface TradeAnalysis {
     take_profit_1_price: number | null;
     take_profit_2: string;
     take_profit_2_price: number | null;
+    distance_unit: "PIP" | "POINT";
+    stop_loss_distance: number | null;
+    take_profit_1_distance: number | null;
+    take_profit_2_distance: number | null;
     risk_reward: string;
     invalidation: string;
     holding_period: string;
@@ -103,6 +113,10 @@ export interface TradeAnalysis {
     source: "Dukascopy";
     last_updated: string;
     source_price: number;
+    reference_price: number;
+    reference_price_at: string;
+    reference_timeframe: "M1";
+    /** Legacy database compatibility fields; the value now comes from Dukascopy M1. */
     xtb_price: number;
     xtb_price_at: string;
     price_offset: number;
@@ -119,8 +133,6 @@ interface ReanalysisAdvice {
 
 export interface AnalyzeRequest {
   instrument: InstrumentId;
-  xtbPrice: number;
-  xtbPriceAt: string;
   volume?: number;
   riskPercent: number;
   maxMarginPercent: number;
@@ -137,6 +149,7 @@ interface Snapshot extends TimeframeReading {
 }
 
 const PRICE_DIGITS: Record<InstrumentId, number> = { DE40: 1, US100: 1, US500: 1, EURUSD: 5 };
+const DISTANCE_SIZE: Record<InstrumentId, number> = { DE40: 1, US100: 1, US500: 1, EURUSD: 0.0001 };
 const CONTRACTS: Record<InstrumentId, { multiplier: number; quoteCurrency: "EUR" | "USD"; leverage: number }> = {
   DE40: { multiplier: 25, quoteCurrency: "EUR", leverage: 20 },
   US100: { multiplier: 20, quoteCurrency: "USD", leverage: 20 },
@@ -200,6 +213,16 @@ function formatPrice(instrument: InstrumentId, value: number) {
   return value.toLocaleString("cs-CZ", { minimumFractionDigits: PRICE_DIGITS[instrument], maximumFractionDigits: PRICE_DIGITS[instrument] });
 }
 
+function distanceValue(instrument: InstrumentId, priceDistance: number) {
+  return Math.abs(priceDistance) / DISTANCE_SIZE[instrument];
+}
+
+function formatDistance(instrument: InstrumentId, priceDistance: number) {
+  const value = distanceValue(instrument, priceDistance);
+  const rendered = value.toLocaleString("cs-CZ", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  return `${rendered} ${instrument === "EURUSD" ? "pipů" : "bodů"}`;
+}
+
 function signalFromScore(score: number): Signal {
   if (score >= 2) return "bullish";
   if (score <= -2) return "bearish";
@@ -257,7 +280,7 @@ function timeframeReading(value: Snapshot): TimeframeReading {
   return { timeframe: value.timeframe, signal: value.signal, close: value.close, ema20: value.ema20, ema50: value.ema50, ema200: value.ema200, rsi14: value.rsi14, atr14: value.atr14, candles: value.candles };
 }
 
-function buildReanalysisAdvice(request: AnalyzeRequest, h1: Snapshot, m15: Snapshot, m5: Snapshot): ReanalysisAdvice {
+function buildReanalysisAdvice(h1: Snapshot, m15: Snapshot, m5: Snapshot): ReanalysisAdvice {
   let triggerTimeframe: AnalysisTimeframe = "M5";
   let reason = "Vyšší timeframy jsou použitelné, ale M5 zatím nepotvrdil dostatečně silný vstup.";
 
@@ -281,8 +304,7 @@ function buildReanalysisAdvice(request: AnalyzeRequest, h1: Snapshot, m15: Snaps
 
   const intervalMinutes: Record<AnalysisTimeframe, number> = { H1: 60, M15: 15, M5: 5 };
   const intervalMs = intervalMinutes[triggerTimeframe] * 60_000;
-  const requestTime = Date.parse(request.xtbPriceAt);
-  const referenceTime = Math.max(Number.isFinite(requestTime) ? requestTime : 0, Date.now());
+  const referenceTime = Date.now();
   const recommendedTime = Math.floor(referenceTime / intervalMs) * intervalMs + intervalMs + 60_000;
 
   return {
@@ -348,7 +370,12 @@ function buildPositionSizing(
   };
 }
 
-export function buildTradeAnalysis(request: AnalyzeRequest, market: Record<AnalysisTimeframe, MarketCandle[]>, fxRates: CzkFxRates): TradeAnalysis {
+export function buildTradeAnalysis(
+  request: AnalyzeRequest,
+  market: Record<AnalysisTimeframe, MarketCandle[]>,
+  referenceQuote: MarketReferenceQuote,
+  fxRates: CzkFxRates,
+): TradeAnalysis {
   const h1 = snapshot("H1", market.H1);
   const m15 = snapshot("M15", market.M15);
   const m5 = snapshot("M5", market.M5);
@@ -362,13 +389,11 @@ export function buildTradeAnalysis(request: AnalyzeRequest, market: Record<Analy
   if (longAligned && totalScore >= 10 && momentumSafeLong) verdict = "LONG";
   if (shortAligned && totalScore <= -10 && momentumSafeShort) verdict = "SHORT";
 
-  const sourcePrice = m5.close;
-  const xtbPrice = request.xtbPrice;
-  const priceOffset = xtbPrice - sourcePrice;
-  const entry = sourcePrice + priceOffset;
+  const sourcePrice = referenceQuote.price;
+  const entry = sourcePrice;
   const swingWindow = market.M5.slice(-12, -1);
-  const swingLow = Math.min(...swingWindow.map((candle) => candle.low)) + priceOffset;
-  const swingHigh = Math.max(...swingWindow.map((candle) => candle.high)) + priceOffset;
+  const swingLow = Math.min(...swingWindow.map((candle) => candle.low));
+  const swingHigh = Math.max(...swingWindow.map((candle) => candle.high));
   let stop = entry;
   if (verdict === "LONG") stop = Math.min(swingLow - m5.atr14 * 0.15, entry - m5.atr14 * 0.9);
   if (verdict === "SHORT") stop = Math.max(swingHigh + m5.atr14 * 0.15, entry + m5.atr14 * 0.9);
@@ -383,10 +408,12 @@ export function buildTradeAnalysis(request: AnalyzeRequest, market: Record<Analy
   const holdingMin = Math.max(45, estimatedM15Candles * 15);
   const holdingMax = Math.min(360, Math.max(holdingMin + 45, holdingMin * 2));
   const confidence = verdict === "NO_TRADE" ? Math.min(86, 52 + Math.max(0, 8 - Math.abs(totalScore)) * 4) : Math.min(90, 58 + Math.abs(totalScore) * 2);
-  const reanalysis = verdict === "NO_TRADE" ? buildReanalysisAdvice(request, h1, m15, m5) : null;
+  const reanalysis = verdict === "NO_TRADE" ? buildReanalysisAdvice(h1, m15, m5) : null;
   const positionSizing = buildPositionSizing(request, verdict, entry, stop, fxRates);
-  const deviation = Math.abs(priceOffset / sourcePrice) * 100;
-  const offsetWarning = deviation > (request.instrument === "EURUSD" ? 0.2 : 0.5) ? `Zadaná cena XTB se od Dukascopy liší o ${deviation.toFixed(2)} %. Přesné úrovně proto ověř přímo v xStation.` : null;
+  const stopDistance = distanceValue(request.instrument, riskDistance);
+  const tp1Distance = distanceValue(request.instrument, Math.abs(tp1 - entry));
+  const tp2Distance = distanceValue(request.instrument, Math.abs(tp2 - entry));
+  const distanceUnit: "PIP" | "POINT" = request.instrument === "EURUSD" ? "PIP" : "POINT";
 
   const indicators: IndicatorReading[] = snapshots.flatMap((item) => [
     { name: `${item.timeframe} trend`, reading: `Close ${formatPrice(request.instrument, item.close)}, EMA 20/50/200: ${formatPrice(request.instrument, item.ema20)} / ${formatPrice(request.instrument, item.ema50)} / ${formatPrice(request.instrument, item.ema200)}`, signal: item.signal },
@@ -402,6 +429,10 @@ export function buildTradeAnalysis(request: AnalyzeRequest, market: Record<Analy
     take_profit_1_price: null,
     take_profit_2: "Nestanovuje se",
     take_profit_2_price: null,
+    distance_unit: distanceUnit,
+    stop_loss_distance: null,
+    take_profit_1_distance: null,
+    take_profit_2_distance: null,
     risk_reward: "Obchod se neotevírá",
     invalidation: `Novou analýzu spusť po uzavření další ${reanalysis!.trigger_timeframe} svíčky.`,
     holding_period: "Nestanovuje se",
@@ -409,16 +440,20 @@ export function buildTradeAnalysis(request: AnalyzeRequest, market: Record<Analy
     holding_period_max_minutes: null,
     time_stop_rule: "Bez aktivního obchodu.",
   } : {
-    entry_zone: formatPrice(request.instrument, entry),
+    entry_zone: `Poblíž reference ${formatPrice(request.instrument, entry)}`,
     entry_price: entry,
-    stop_loss: formatPrice(request.instrument, stop),
+    stop_loss: `${formatDistance(request.instrument, riskDistance)} proti směru`,
     stop_loss_price: stop,
-    take_profit_1: formatPrice(request.instrument, tp1),
+    take_profit_1: `${formatDistance(request.instrument, tp1 - entry)} ve směru`,
     take_profit_1_price: tp1,
-    take_profit_2: formatPrice(request.instrument, tp2),
+    take_profit_2: `${formatDistance(request.instrument, tp2 - entry)} ve směru`,
     take_profit_2_price: tp2,
+    distance_unit: distanceUnit,
+    stop_loss_distance: stopDistance,
+    take_profit_1_distance: tp1Distance,
+    take_profit_2_distance: tp2Distance,
     risk_reward: "TP1 1:1,5 · TP2 1:2",
-    invalidation: verdict === "LONG" ? `M5 close pod ${formatPrice(request.instrument, stop)}` : `M5 close nad ${formatPrice(request.instrument, stop)}`,
+    invalidation: `M5 close za SL, tedy přibližně ${formatDistance(request.instrument, riskDistance)} proti směru vstupu`,
     holding_period: `${holdingMin}–${holdingMax} minut`,
     holding_period_min_minutes: holdingMin,
     holding_period_max_minutes: holdingMax,
@@ -434,16 +469,26 @@ export function buildTradeAnalysis(request: AnalyzeRequest, market: Record<Analy
     setup,
     reasons,
     risks: [
-      "Dukascopy a XTB používají odlišný CFD feed; směr trhu bývá podobný, přesné ceny se mohou lišit.",
+      "SL a TP jsou uvedené jako vzdálenost od skutečné vstupní ceny v XTB; absolutní cena se mezi feedy může lišit.",
       "Technický model nedokáže předvídat neplánované zprávy, geopolitické události ani mimořádné projevy centrálních bankéřů.",
       ...(positionSizing ? ["Doporučený objem je odhad podle aktuálního SL a referenčního kurzu ECB. Spread, skluz a kurzová přirážka XTB mohou skutečnou ztrátu zvýšit."] : []),
-      ...(offsetWarning ? [offsetWarning] : []),
       ...(request.accountSize ? [`Při riziku ${request.riskPercent} % je maximální plánovaná ztráta ${(request.accountSize * request.riskPercent / 100).toLocaleString("cs-CZ", { maximumFractionDigits: 0 })} Kč.`] : []),
     ],
     position_sizing: positionSizing,
     reanalysis,
-    next_step: verdict === "NO_TRADE" ? `Počkej přibližně ${reanalysis!.wait_minutes} min do uzavření další ${reanalysis!.trigger_timeframe} svíčky a potom spusť analýzu znovu. Nevstupuj jen proto, že je trh aktivní.` : "Před vstupem zkontroluj spread a aktuální cenu v XTB. Pokud se cena vzdálila od entry o více než 0,3 ATR M5, obchod přeskoč.",
+    next_step: verdict === "NO_TRADE" ? `Počkej přibližně ${reanalysis!.wait_minutes} min do uzavření další ${reanalysis!.trigger_timeframe} svíčky a potom spusť analýzu znovu. Nevstupuj jen proto, že je trh aktivní.` : "V XTB použij vzdálenosti SL a TP od své skutečné vstupní ceny. Pokud se trh od referenční ceny mezitím výrazně vzdálil, spusť analýzu znovu.",
     disclaimer: "Jde o automatickou vzdělávací technickou analýzu historických OHLC dat, nikoli finanční doporučení ani garanci výsledku.",
-    data: { source: "Dukascopy", last_updated: new Date(m5.last.timestamp).toISOString(), source_price: sourcePrice, xtb_price: xtbPrice, xtb_price_at: request.xtbPriceAt, price_offset: priceOffset, total_score: totalScore },
+    data: {
+      source: "Dukascopy",
+      last_updated: new Date(referenceQuote.timestamp).toISOString(),
+      source_price: sourcePrice,
+      reference_price: sourcePrice,
+      reference_price_at: new Date(referenceQuote.timestamp).toISOString(),
+      reference_timeframe: referenceQuote.timeframe,
+      xtb_price: sourcePrice,
+      xtb_price_at: new Date(referenceQuote.timestamp).toISOString(),
+      price_offset: 0,
+      total_score: totalScore,
+    },
   };
 }

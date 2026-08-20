@@ -7,6 +7,7 @@ import {
   type AnalyzeRequest,
   type InstrumentId,
   type MarketCandle,
+  type MarketReferenceQuote,
 } from "@/lib/trade-analysis";
 import { persistAnalysis, type PersistenceResult } from "@/lib/trade-journal";
 
@@ -29,6 +30,7 @@ const TIMEFRAMES = {
 interface CacheEntry {
   expiresAt: number;
   market: Record<AnalysisTimeframe, MarketCandle[]>;
+  referenceQuote: MarketReferenceQuote;
 }
 
 const marketCache = new Map<InstrumentId, CacheEntry>();
@@ -40,13 +42,6 @@ function isInstrument(value: unknown): value is InstrumentId {
 
 function validate(body: Partial<AnalyzeRequest>): string | null {
   if (!isInstrument(body.instrument)) return "Vyber podporovaný instrument.";
-  if (!Number.isFinite(body.xtbPrice) || !body.xtbPrice || body.xtbPrice <= 0) return "Aktuální cena XTB je povinná a musí být kladné číslo.";
-  if (typeof body.xtbPriceAt !== "string" || !body.xtbPriceAt) return "Čas ceny XTB je povinný.";
-  const priceTime = Date.parse(body.xtbPriceAt);
-  if (!Number.isFinite(priceTime)) return "Čas ceny XTB není platný.";
-  const age = Date.now() - priceTime;
-  if (age < -5 * 60_000) return "Čas ceny XTB nesmí být více než 5 minut v budoucnosti.";
-  if (age > 30 * 60_000) return "Cena XTB je starší než 30 minut. Aktualizuj cenu a stiskni Nyní.";
   if (!Number.isFinite(body.riskPercent) || !body.riskPercent || body.riskPercent < 0.1 || body.riskPercent > 5) {
     return "Riziko musí být mezi 0,1 a 5 %.";
   }
@@ -55,6 +50,23 @@ function validate(body: Partial<AnalyzeRequest>): string | null {
   }
   if (!Number.isFinite(body.accountSize) || !body.accountSize || body.accountSize <= 0) return "Velikost účtu je povinná a musí být kladné číslo.";
   return null;
+}
+
+async function fetchReferenceQuote(instrument: InstrumentId): Promise<MarketReferenceQuote> {
+  const rows = await getRealTimeRates({
+    instrument: INSTRUMENTS[instrument],
+    timeframe: "m1",
+    format: "json",
+    last: 5,
+    volumes: false,
+    priceType: "bid",
+  });
+  const duration = 60_000;
+  const lastClosed = (rows as JsonItem[]).filter((row) => row.timestamp + duration <= Date.now()).at(-1);
+  if (!lastClosed || !Number.isFinite(lastClosed.close) || lastClosed.close <= 0) {
+    throw new Error("Referenční cenu z poslední uzavřené M1 svíčky se nepodařilo načíst.");
+  }
+  return { price: lastClosed.close, timestamp: lastClosed.timestamp + duration, timeframe: "M1" };
 }
 
 async function fetchEcbRate(currency: "CZK" | "USD") {
@@ -108,18 +120,20 @@ async function fetchCandles(instrument: InstrumentId, timeframe: AnalysisTimefra
     }));
 }
 
-async function getMarket(instrument: InstrumentId) {
+async function getMarketData(instrument: InstrumentId) {
   const cached = marketCache.get(instrument);
-  if (cached && cached.expiresAt > Date.now()) return cached.market;
+  if (cached && cached.expiresAt > Date.now()) return cached;
 
-  const [H1, M15, M5] = await Promise.all([
+  const [H1, M15, M5, referenceQuote] = await Promise.all([
     fetchCandles(instrument, "H1"),
     fetchCandles(instrument, "M15"),
     fetchCandles(instrument, "M5"),
+    fetchReferenceQuote(instrument),
   ]);
   const market = { H1, M15, M5 };
-  marketCache.set(instrument, { market, expiresAt: Date.now() + 60_000 });
-  return market;
+  const entry = { market, referenceQuote, expiresAt: Date.now() + 60_000 };
+  marketCache.set(instrument, entry);
+  return entry;
 }
 
 export async function POST(request: Request) {
@@ -130,17 +144,15 @@ export async function POST(request: Request) {
 
     const input: AnalyzeRequest = {
       instrument: body.instrument!,
-      xtbPrice: body.xtbPrice!,
-      xtbPriceAt: body.xtbPriceAt!,
       riskPercent: body.riskPercent!,
       maxMarginPercent: body.maxMarginPercent!,
       accountSize: body.accountSize!,
     };
-    const [market, fxRates] = await Promise.all([
-      getMarket(input.instrument),
+    const [{ market, referenceQuote }, fxRates] = await Promise.all([
+      getMarketData(input.instrument),
       getCzkFxRates(),
     ]);
-    const analysis = buildTradeAnalysis(input, market, fxRates);
+    const analysis = buildTradeAnalysis(input, market, referenceQuote, fxRates);
     let persistence: PersistenceResult = { stored: false, analysisId: null };
     try {
       persistence = await persistAnalysis(input, analysis);

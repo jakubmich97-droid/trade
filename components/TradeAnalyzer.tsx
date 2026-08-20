@@ -34,13 +34,6 @@ const INSTRUMENTS: Array<{ id: InstrumentId; name: string; description: string }
   { id: "EURUSD", name: "EUR/USD", description: "Euro / US Dollar" },
 ];
 
-const XTB_PRICE_CURRENCY: Record<InstrumentId, string> = {
-  DE40: "EUR",
-  US100: "USD",
-  US500: "USD",
-  EURUSD: "USD / 1 EUR",
-};
-
 interface HistoryItem {
   id: string;
   createdAt: string;
@@ -191,8 +184,6 @@ function SetupField({ label, value, accent }: { label: string; value: string; ac
 export function TradeAnalyzer() {
   const resultRef = useRef<HTMLElement>(null);
   const [instrument, setInstrument] = useState<InstrumentId>("DE40");
-  const [xtbPrice, setXtbPrice] = useState("");
-  const [xtbPriceAt, setXtbPriceAt] = useState(() => pragueNowInput());
   const [riskPercent, setRiskPercent] = useState(1);
   const [maxMarginPercent, setMaxMarginPercent] = useState(5);
   const [accountSize, setAccountSize] = useState("200000");
@@ -284,8 +275,6 @@ export function TradeAnalyzer() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           instrument,
-          xtbPrice: parseLocalizedNumber(xtbPrice),
-          xtbPriceAt: pragueInputToIso(xtbPriceAt),
           riskPercent,
           maxMarginPercent,
           accountSize: Number(accountSize),
@@ -533,7 +522,7 @@ export function TradeAnalyzer() {
 
           <div className="instrument-grid">
             {INSTRUMENTS.map((item) => (
-              <button key={item.id} type="button" className={`instrument-card ${instrument === item.id ? "instrument-card--active" : ""}`} onClick={() => { setInstrument(item.id); setAnalysis(null); setXtbPrice(""); setXtbPriceAt(pragueNowInput()); }}>
+              <button key={item.id} type="button" className={`instrument-card ${instrument === item.id ? "instrument-card--active" : ""}`} onClick={() => { setInstrument(item.id); setAnalysis(null); }}>
                 <span><BarChart3 size={19} /></span>
                 <strong>{item.name}</strong>
                 <small>{item.description}</small>
@@ -558,18 +547,10 @@ export function TradeAnalyzer() {
 
         <div className="panel settings-panel">
           <div className="panel__heading">
-            <div><span className="step">02</span><div><h2>Nastavení obchodu</h2><p>Zadej aktuální cenu, velikost účtu a maximální přijatelné riziko.</p></div></div>
+            <div><span className="step">02</span><div><h2>Nastavení obchodu</h2><p>Cena a její čas se načtou automaticky z poslední uzavřené M1 svíčky Dukascopy.</p></div></div>
           </div>
 
           <div className="form-grid">
-            <label className="field field--wide">
-              <span>Aktuální cena v XTB <em>povinné · měna kotace {XTB_PRICE_CURRENCY[instrument]}</em></span>
-              <div className="input-wrap price-input"><Gauge size={17} /><input required inputMode="decimal" value={xtbPrice} onChange={(event) => setXtbPrice(event.target.value)} placeholder={instrument === "EURUSD" ? "např. 1,16520" : "např. 24 850,5"} /><b>{XTB_PRICE_CURRENCY[instrument]}</b></div>
-            </label>
-            <label className="field field--wide">
-              <span>Čas zadané ceny <em>Europe/Prague · povinné</em></span>
-              <div className="datetime-wrap"><Clock3 size={17} /><input required type="datetime-local" value={xtbPriceAt} onChange={(event) => setXtbPriceAt(event.target.value)} /><button type="button" onClick={() => setXtbPriceAt(pragueNowInput())}>Nyní</button></div>
-            </label>
             <label className="field">
               <span>Velikost účtu <em>povinné</em></span>
               <div className="suffix-input"><input required type="number" min="1" step="1" value={accountSize} onChange={(event) => setAccountSize(event.target.value)} placeholder="200 000" /><b>Kč</b></div>
@@ -596,10 +577,10 @@ export function TradeAnalyzer() {
           </div>
 
           {error && <div className="error-message"><AlertTriangle size={17} /><span>{error}</span></div>}
-          <button className="analyze-button" type="button" onClick={analyze} disabled={loading || !xtbPrice.trim() || !xtbPriceAt || Number(accountSize) <= 0 || riskPercent < 0.1 || riskPercent > 5 || maxMarginPercent < 5 || maxMarginPercent > 100}>
-            {loading ? <><LoaderCircle className="spin" size={19} /> Stahuji a počítám 1 200 svíček…</> : <><Zap size={19} /> Načíst data a analyzovat <ArrowRight size={18} /></>}
+          <button className="analyze-button" type="button" onClick={analyze} disabled={loading || Number(accountSize) <= 0 || riskPercent < 0.1 || riskPercent > 5 || maxMarginPercent < 5 || maxMarginPercent > 100}>
+            {loading ? <><LoaderCircle className="spin" size={19} /> Stahuji svíčky a referenční cenu…</> : <><Zap size={19} /> Načíst data a analyzovat <ArrowRight size={18} /></>}
           </button>
-          <p className="button-note"><RefreshCw size={13} /> Data se při opakování obnoví nejvýše jednou za minutu.</p>
+          <p className="button-note"><RefreshCw size={13} /> Reference je z Dukascopy M1; SL a TP se zobrazí jako vzdálenosti v pipech nebo bodech.</p>
         </div>
       </section>
 
@@ -607,7 +588,7 @@ export function TradeAnalyzer() {
         <section ref={resultRef} className={`result result--${analysis.verdict.toLowerCase()}`}>
           <div className="result__top">
             <div>
-              <span className="result-kicker"><Database size={15} /> {analysis.detected.instrument} · XTB {formatJournalPrice(analysis.detected.instrument, analysis.data.xtb_price)} · {analysis.data.xtb_price_at ? formatPragueTime(analysis.data.xtb_price_at) : new Date(analysis.data.last_updated).toLocaleString("cs-CZ")}</span>
+              <span className="result-kicker"><Database size={15} /> {analysis.detected.instrument} · Dukascopy M1 {formatJournalPrice(analysis.detected.instrument, analysis.data.reference_price ?? analysis.data.source_price)} · {formatPragueTime(analysis.data.reference_price_at ?? analysis.data.last_updated)}</span>
               <div className="verdict-line">
                 <span className="verdict-icon">{analysis.verdict === "LONG" ? <ArrowUpRight /> : analysis.verdict === "SHORT" ? <ArrowDownRight /> : <X />}</span>
                 <div><small>Verdikt</small><h2>{verdictLabel(analysis.verdict)}</h2></div>

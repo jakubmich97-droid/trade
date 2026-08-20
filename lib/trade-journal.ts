@@ -2,7 +2,7 @@ import "server-only";
 import { getSql } from "@/lib/db";
 import type { AnalyzeRequest, TradeAnalysis } from "@/lib/trade-analysis";
 
-export const STRATEGY_VERSION = "v1.6.0";
+export const STRATEGY_VERSION = "v1.7.0";
 
 export type ExitReason = "TP1" | "TP2" | "SL" | "BE" | "TIME_STOP" | "MANUAL";
 
@@ -68,7 +68,7 @@ export async function persistAnalysis(input: AnalyzeRequest, analysis: TradeAnal
       timeframes, indicators, reasons, risks, raw_analysis
     ) VALUES (
       ${STRATEGY_VERSION}, ${analysis.detected.instrument}, ${analysis.verdict}, ${analysis.confidence}, ${analysis.data.total_score},
-      ${analysis.data.last_updated}, ${analysis.data.source_price}, ${analysis.data.xtb_price}, ${input.xtbPriceAt}, ${analysis.data.price_offset}, ${analysis.market_read},
+      ${analysis.data.last_updated}, ${analysis.data.source_price}, ${analysis.data.xtb_price}, ${analysis.data.reference_price_at}, ${analysis.data.price_offset}, ${analysis.market_read},
       ${JSON.stringify(analysis.detected.timeframes)}::jsonb,
       ${JSON.stringify(analysis.detected.indicators)}::jsonb,
       ${JSON.stringify(analysis.reasons)}::jsonb,
@@ -100,16 +100,15 @@ export async function persistAnalysis(input: AnalyzeRequest, analysis: TradeAnal
 export async function confirmLiveTrade(analysisId: string) {
   const sql = getSql();
   const rows = await sql`
-    SELECT id, verdict, xtb_price, raw_analysis
+    SELECT id, verdict, raw_analysis
     FROM analyses
     WHERE id = ${analysisId}
     LIMIT 1
-  ` as Array<{ id: string; verdict: TradeAnalysis["verdict"]; xtb_price: string | null; raw_analysis: { analysis: TradeAnalysis; request: AnalyzeRequest } }>;
+  ` as Array<{ id: string; verdict: TradeAnalysis["verdict"]; raw_analysis: { analysis: TradeAnalysis; request: AnalyzeRequest } }>;
 
   const stored = rows[0];
   if (!stored) throw new Error("Uložená analýza nebyla nalezena.");
   if (stored.verdict === "NO_TRADE") throw new Error("NO TRADE nelze označit jako otevřený obchod.");
-  if (stored.xtb_price === null) throw new Error("Pro reálný obchod nejdřív zadej aktuální cenu z XTB a spusť analýzu znovu.");
 
   const analysis = stored.raw_analysis.analysis;
   const input = stored.raw_analysis.request;
@@ -128,10 +127,10 @@ export async function confirmLiveTrade(analysisId: string) {
       position_size, risk_percent, account_size_czk, risk_amount_czk,
       note
     ) VALUES (
-      ${analysisId}, 'LIVE', ${stored.verdict}, ${input.xtbPriceAt}, ${levels.entry}, ${levels.stop},
+      ${analysisId}, 'LIVE', ${stored.verdict}, ${analysis.data.reference_price_at}, ${levels.entry}, ${levels.stop},
       ${levels.tp1}, ${levels.tp2}, ${analysis.setup.holding_period_min_minutes}, ${analysis.setup.holding_period_max_minutes},
       ${recommendedVolume}, ${actualRiskPercent}, ${input.accountSize}, ${riskAmount},
-      ${`Uživatel potvrdil vstup; cílové riziko ${input.riskPercent} %, max. marže ${input.maxMarginPercent} %, objem doporučen aplikací`}
+      ${`Uživatel potvrdil vstup podle reference Dukascopy M1; cílové riziko ${input.riskPercent} %, max. marže ${input.maxMarginPercent} %, objem doporučen aplikací`}
     )
     ON CONFLICT (analysis_id, mode)
     DO UPDATE SET analysis_id = EXCLUDED.analysis_id
