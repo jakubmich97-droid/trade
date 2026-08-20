@@ -42,10 +42,35 @@ const REFERENCE_MAX_AGE_MS = {
   H1: 2 * 60 * 60_000,
 } as const;
 
+const MARKET_MAX_AGE_MS: Record<AnalysisTimeframe, number> = {
+  H1: 120 * 60_000,
+  M15: 30 * 60_000,
+  M5: 15 * 60_000,
+};
+
+interface MarketFreshnessItem {
+  timeframe: AnalysisTimeframe;
+  lastClosedAt: string | null;
+  ageMinutes: number | null;
+  maxAgeMinutes: number;
+  fresh: boolean;
+}
+
 class FreshReferenceQuoteError extends Error {
   constructor(instrument: InstrumentId) {
     super(`Dukascopy pro ${instrument} právě neposkytuje dostatečně čerstvou referenční cenu. Zkus analýzu později.`);
     this.name = "FreshReferenceQuoteError";
+  }
+}
+
+class StaleMarketDataError extends Error {
+  readonly freshness: MarketFreshnessItem[];
+
+  constructor(instrument: InstrumentId, freshness: MarketFreshnessItem[]) {
+    const staleTimeframes = freshness.filter((item) => !item.fresh).map((item) => item.timeframe).join(", ");
+    super(`NO TRADE – ${instrument} má neaktuální data pro ${staleTimeframes}. Analýza nebyla provedena.`);
+    this.name = "StaleMarketDataError";
+    this.freshness = freshness;
   }
 }
 
@@ -130,6 +155,28 @@ function resolveReferenceQuote(
   throw new FreshReferenceQuoteError(instrument);
 }
 
+function inspectMarketFreshness(market: Record<AnalysisTimeframe, MarketCandle[]>): MarketFreshnessItem[] {
+  const now = Date.now();
+  return (Object.keys(TIMEFRAMES) as AnalysisTimeframe[]).map((timeframe) => {
+    const lastCandle = market[timeframe].at(-1);
+    const lastClosedTimestamp = lastCandle ? lastCandle.timestamp + TIMEFRAMES[timeframe].duration : null;
+    const ageMs = lastClosedTimestamp === null ? null : Math.max(0, now - lastClosedTimestamp);
+    const maxAgeMs = MARKET_MAX_AGE_MS[timeframe];
+    return {
+      timeframe,
+      lastClosedAt: lastClosedTimestamp === null ? null : new Date(lastClosedTimestamp).toISOString(),
+      ageMinutes: ageMs === null ? null : Math.ceil(ageMs / 60_000),
+      maxAgeMinutes: maxAgeMs / 60_000,
+      fresh: ageMs !== null && lastClosedTimestamp! <= now && ageMs <= maxAgeMs,
+    };
+  });
+}
+
+function assertMarketFreshness(instrument: InstrumentId, market: Record<AnalysisTimeframe, MarketCandle[]>) {
+  const freshness = inspectMarketFreshness(market);
+  if (freshness.some((item) => !item.fresh)) throw new StaleMarketDataError(instrument, freshness);
+}
+
 async function fetchEcbRate(currency: "CZK" | "USD") {
   const response = await fetch(`https://data-api.ecb.europa.eu/service/data/EXR/D.${currency}.EUR.SP00.A?format=csvdata&lastNObservations=1`, {
     cache: "no-store",
@@ -192,6 +239,7 @@ async function getMarketData(instrument: InstrumentId) {
     fetchM1ReferenceQuote(instrument),
   ]);
   const market = { H1, M15, M5 };
+  assertMarketFreshness(instrument, market);
   const referenceQuote = resolveReferenceQuote(instrument, market, m1Quote);
   const entry = { market, referenceQuote, expiresAt: Date.now() + 60_000 };
   marketCache.set(instrument, entry);
@@ -223,18 +271,23 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ analysis, persistence });
   } catch (error) {
-    console.error("Dukascopy analysis error", error);
+    if (error instanceof StaleMarketDataError) console.warn("Dukascopy market data is stale", { message: error.message, freshness: error.freshness });
+    else console.error("Dukascopy analysis error", error);
     const isCurrencyError = error instanceof Error && error.message.startsWith("ECB kurz");
     const isReferenceError = error instanceof FreshReferenceQuoteError;
+    const isStaleMarketError = error instanceof StaleMarketDataError;
     return NextResponse.json(
       {
-        error: isReferenceError
+        error: isStaleMarketError
+          ? error.message
+          : isReferenceError
           ? error.message
           : isCurrencyError
             ? "Kurzová data ECB pro výpočet objemu nejsou právě dostupná. Zkus analýzu znovu za chvíli."
             : "Tržní data se teď nepodařilo načíst. Zkus analýzu znovu za chvíli.",
+        ...(isStaleMarketError ? { code: "STALE_MARKET_DATA", freshness: error.freshness, retryAfterMinutes: 5 } : {}),
       },
-      { status: isReferenceError ? 503 : 502 },
+      { status: isReferenceError || isStaleMarketError ? 503 : 502 },
     );
   }
 }

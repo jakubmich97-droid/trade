@@ -25,7 +25,7 @@ import {
   Zap,
 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { rebaseTradeAnalysis, type InstrumentId, type Signal, type TradeAnalysis, type Verdict } from "@/lib/trade-analysis";
+import { rebaseTradeAnalysis, type AnalysisTimeframe, type InstrumentId, type Signal, type TradeAnalysis, type Verdict } from "@/lib/trade-analysis";
 
 const INSTRUMENTS: Array<{ id: InstrumentId; name: string; description: string }> = [
   { id: "DE40", name: "DE40", description: "Germany 40 / DAX" },
@@ -46,6 +46,20 @@ interface HistoryItem {
 interface PersistenceState {
   stored: boolean;
   analysisId: string | null;
+}
+
+interface MarketFreshnessItem {
+  timeframe: AnalysisTimeframe;
+  lastClosedAt: string | null;
+  ageMinutes: number | null;
+  maxAgeMinutes: number;
+  fresh: boolean;
+}
+
+interface MarketDataIssue {
+  message: string;
+  freshness: MarketFreshnessItem[];
+  retryAfterMinutes: number;
 }
 
 interface PerformanceItem {
@@ -189,6 +203,7 @@ export function TradeAnalyzer() {
   const [accountSize, setAccountSize] = useState("200000");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [marketDataIssue, setMarketDataIssue] = useState<MarketDataIssue | null>(null);
   const [analysis, setAnalysis] = useState<TradeAnalysis | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [persistence, setPersistence] = useState<PersistenceState | null>(null);
@@ -270,6 +285,7 @@ export function TradeAnalyzer() {
   async function analyze() {
     setLoading(true);
     setError("");
+    setMarketDataIssue(null);
     setAnalysis(null);
     setPersistence(null);
     setConfirmNotice("");
@@ -288,7 +304,22 @@ export function TradeAnalyzer() {
           accountSize: Number(accountSize),
         }),
       });
-      const payload = (await response.json()) as { analysis?: TradeAnalysis; persistence?: PersistenceState; error?: string };
+      const payload = (await response.json()) as {
+        analysis?: TradeAnalysis;
+        persistence?: PersistenceState;
+        error?: string;
+        code?: string;
+        freshness?: MarketFreshnessItem[];
+        retryAfterMinutes?: number;
+      };
+      if (!response.ok && payload.code === "STALE_MARKET_DATA" && payload.freshness) {
+        setMarketDataIssue({
+          message: payload.error || "Tržní data nejsou dostatečně aktuální.",
+          freshness: payload.freshness,
+          retryAfterMinutes: payload.retryAfterMinutes ?? 5,
+        });
+        return;
+      }
       if (!response.ok || !payload.analysis) throw new Error(payload.error || "Analýzu se nepodařilo dokončit.");
       setAnalysis(payload.analysis);
       setPersistence(payload.persistence ?? null);
@@ -604,10 +635,33 @@ export function TradeAnalyzer() {
               <li><Check size={14} /> Celkové skóre alespoň ±10</li>
               <li><Check size={14} /> RSI mimo extrémní oblast</li>
               <li><Check size={14} /> TP2 minimálně R:R 1:2</li>
+              <li><Check size={14} /> Čerstvá data H1, M15 a M5</li>
             </ul>
           </div>
 
           {error && <div className="error-message"><AlertTriangle size={17} /><span>{error}</span></div>}
+          {marketDataIssue && (
+            <div className="market-freshness-warning" role="status">
+              <div className="market-freshness-warning__heading">
+                <AlertTriangle size={19} />
+                <div>
+                  <span>Ochrana proti zastaralým datům</span>
+                  <strong>NO TRADE – neaktuální data</strong>
+                  <p>{marketDataIssue.message}</p>
+                </div>
+              </div>
+              <div className="market-freshness-grid">
+                {marketDataIssue.freshness.map((item) => (
+                  <div className={`market-freshness-item market-freshness-item--${item.fresh ? "fresh" : "stale"}`} key={item.timeframe}>
+                    <div><b>{item.timeframe}</b><strong>{item.fresh ? "Aktuální" : "Zastaralé"}</strong></div>
+                    <span>{item.lastClosedAt ? formatPragueTime(item.lastClosedAt) : "Svíčka chybí"}</span>
+                    <small>{item.ageMinutes === null ? "Bez údaje o stáří" : `Stáří ${item.ageMinutes} min · limit ${item.maxAgeMinutes} min`}</small>
+                  </div>
+                ))}
+              </div>
+              <p className="market-freshness-warning__retry"><RefreshCw size={13} /> Zkus načíst nová data nejdříve za {marketDataIssue.retryAfterMinutes} minut. Dokud feed nedodá nové svíčky, aplikace obchodní signál nevytvoří.</p>
+            </div>
+          )}
           <button className="analyze-button" type="button" onClick={analyze} disabled={loading || Number(accountSize) <= 0 || riskPercent < 0.1 || riskPercent > 5 || maxMarginPercent < 5 || maxMarginPercent > 100}>
             {loading ? <><LoaderCircle className="spin" size={19} /> Stahuji svíčky a referenční cenu…</> : <><Zap size={19} /> Načíst data a analyzovat <ArrowRight size={18} /></>}
           </button>
