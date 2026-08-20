@@ -2,7 +2,7 @@ import "server-only";
 import { getSql } from "@/lib/db";
 import type { AnalyzeRequest, TradeAnalysis } from "@/lib/trade-analysis";
 
-export const STRATEGY_VERSION = "v1.5.0";
+export const STRATEGY_VERSION = "v1.6.0";
 
 export type ExitReason = "TP1" | "TP2" | "SL" | "BE" | "TIME_STOP" | "MANUAL";
 

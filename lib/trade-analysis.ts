@@ -37,36 +37,6 @@ export interface TimeframeReading {
   candles: number;
 }
 
-export type MacroImpact = "LOW" | "MEDIUM" | "HIGH";
-export type MacroRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "UNKNOWN";
-
-export interface MacroEvent {
-  date: string;
-  country: string;
-  currency: string;
-  event: string;
-  impact: MacroImpact;
-  previous: number | string | null;
-  estimate: number | string | null;
-  actual: number | string | null;
-  unit: string | null;
-  minutes_from_analysis: number;
-}
-
-export interface MacroContext {
-  provider: "FMP";
-  status: "ACTIVE" | "UNAVAILABLE" | "ERROR";
-  fetched_at: string;
-  risk_level: MacroRiskLevel;
-  blocks_trade: boolean;
-  technical_verdict: Verdict;
-  technical_confidence: number;
-  applied_rule: string;
-  nearest_event: MacroEvent | null;
-  events: MacroEvent[];
-  reanalysis_at: string | null;
-}
-
 export interface TradeAnalysis {
   verdict: Verdict;
   market_read: string;
@@ -95,7 +65,6 @@ export interface TradeAnalysis {
   };
   reasons: string[];
   risks: string[];
-  macro_context?: MacroContext;
   position_sizing?: {
     account_size_czk: number;
     target_risk_percent: number;

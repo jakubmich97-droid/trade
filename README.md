@@ -19,9 +19,7 @@ Při každém spuštění se načte až 400 uzavřených svíček pro každý ti
 
 Pravidlový engine počítá EMA 20/50/200, RSI 14, ATR 14 a price action posledních svíček. LONG nebo SHORT vrátí pouze při silné shodě všech tří timeframe; jinak zůstává NO TRADE. U NO TRADE doporučí další vhodný čas analýzy podle timeframe, který vstup blokuje. Aktuální cena z XTB posune vypočtené vstupní a výstupní úrovně na XTB feed. Aktivní signál obsahuje také odhad doporučené doby držení a časový stop odvozený z ATR na M15.
 
-Analýza volitelně používá také ekonomický kalendář Financial Modeling Prep. Pro DE40 sleduje relevantní EUR události a významná americká data, pro US100 a US500 události v USD a pro EUR/USD obě měny. High-impact událost blokuje nové obchody 60 minut před zveřejněním a 15 minut po něm; medium-impact událost 30 minut před a 10 minut po něm. Po události aplikace doporučí počkat na uzavření nové M15 svíčky. Technický verdikt před aplikací filtru, konkrétní událost i použité pravidlo se ukládají do `raw_analysis`, aby šlo později vyhodnotit přínos makro filtru.
-
-Po zadání velikosti korunového účtu, upravitelného rizikového limitu a maximálního využití marže aplikace dopočítá doporučený objem podle vzdálenosti vstupu od stop-lossu, aktuální specifikace XTB kontraktu, retailové páky a referenčního kurzu ECB. Použije přísnější z limitu ztráty při SL a maržového rozpočtu; maržový limit je předvyplněný konzervativní hodnotou 30 %. Objem zaokrouhluje dolů na krok 0,01 lotu. Pokud by už minimální objem překročil některý z limitů, vstup nepovolí. Skutečná marže v xStation se může lišit podle podmínek konkrétního účtu a je rozhodující.
+Po zadání velikosti korunového účtu, upravitelného rizikového limitu a maximálního využití marže aplikace dopočítá doporučený objem podle vzdálenosti vstupu od stop-lossu, aktuální specifikace XTB kontraktu, retailové páky a referenčního kurzu ECB. Použije přísnější z limitu ztráty při SL a maržového rozpočtu; velikost účtu je předvyplněná na 200 000 Kč a maržový limit na konzervativních 5 %, přičemž obě hodnoty lze změnit. Objem zaokrouhluje dolů na krok 0,01 lotu. Pokud by už minimální objem překročil některý z limitů, vstup nepovolí. Skutečná marže v xStation se může lišit podle podmínek konkrétního účtu a je rozhodující.
 
 Každá analýza se ukládá do Neon PostgreSQL. Pro spuštění je povinná aktuální cena z XTB, její čas v pásmu Europe/Prague a velikost účtu. Samotná analýza žádný obchod nevytvoří. Teprve po zobrazení výsledku uživatel potvrdí, zda do obchodu skutečně vstupuje; pouze potvrzený LONG/SHORT se uloží do obchodního deníku. Opakované potvrzení stejné analýzy nevytvoří duplicitu.
 
@@ -36,7 +34,7 @@ npm install
 npm run dev
 ```
 
-Pro tržní data Dukascopy není potřeba API klíč. Pro automatický makro filtr vytvoř bezplatný osobní klíč FMP a na serveru nastav `FMP_API_KEY`; klíč zůstává pouze na backendu. Bez něj aplikace technickou analýzu dokončí, ale výsledek viditelně označí jako makroekonomicky neověřený. Pro ukládání statistik nastav proměnnou `DATABASE_URL` na Neon PostgreSQL connection string.
+Pro tržní data Dukascopy ani pro technickou analýzu není potřeba API klíč. Aplikace nezohledňuje ekonomický kalendář; nadcházející makroekonomické zprávy je potřeba před vstupem zkontrolovat ručně v XTB. Pro ukládání statistik nastav proměnnou `DATABASE_URL` na Neon PostgreSQL connection string.
 
 ## Nasazení
 

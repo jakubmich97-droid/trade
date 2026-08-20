@@ -7,7 +7,6 @@ import {
   ArrowRight,
   ArrowUpRight,
   BarChart3,
-  CalendarDays,
   Check,
   ChevronRight,
   Clock3,
@@ -181,25 +180,6 @@ function signalLabel(signal: Signal) {
   return "Neutral";
 }
 
-function macroRiskLabel(level: NonNullable<TradeAnalysis["macro_context"]>["risk_level"]) {
-  if (level === "HIGH") return "Vysoké makro riziko";
-  if (level === "MEDIUM") return "Zvýšené makro riziko";
-  if (level === "LOW") return "Nízké makro riziko";
-  return "Makro riziko neověřeno";
-}
-
-function relativeMacroTime(minutes: number) {
-  if (minutes === 0) return "právě nyní";
-  if (minutes > 0) return `za ${minutes} min`;
-  return `před ${Math.abs(minutes)} min`;
-}
-
-function macroNumber(value: number | string | null, unit: string | null) {
-  if (value === null) return "—";
-  const rendered = typeof value === "number" ? value.toLocaleString("cs-CZ", { maximumFractionDigits: 3 }) : value;
-  return `${rendered}${unit ? ` ${unit}` : ""}`;
-}
-
 function parseLocalizedNumber(value: string) {
   return Number(value.replace(/\s/g, "").replace(",", "."));
 }
@@ -214,8 +194,8 @@ export function TradeAnalyzer() {
   const [xtbPrice, setXtbPrice] = useState("");
   const [xtbPriceAt, setXtbPriceAt] = useState(() => pragueNowInput());
   const [riskPercent, setRiskPercent] = useState(1);
-  const [maxMarginPercent, setMaxMarginPercent] = useState(30);
-  const [accountSize, setAccountSize] = useState("");
+  const [maxMarginPercent, setMaxMarginPercent] = useState(5);
+  const [accountSize, setAccountSize] = useState("200000");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [analysis, setAnalysis] = useState<TradeAnalysis | null>(null);
@@ -592,7 +572,7 @@ export function TradeAnalyzer() {
             </label>
             <label className="field">
               <span>Velikost účtu <em>povinné</em></span>
-              <div className="suffix-input"><input required type="number" min="1" step="1" value={accountSize} onChange={(event) => setAccountSize(event.target.value)} placeholder="100 000" /><b>Kč</b></div>
+              <div className="suffix-input"><input required type="number" min="1" step="1" value={accountSize} onChange={(event) => setAccountSize(event.target.value)} placeholder="200 000" /><b>Kč</b></div>
             </label>
             <label className="field">
               <span>Maximální riziko <em>lze změnit</em></span>
@@ -641,28 +621,6 @@ export function TradeAnalyzer() {
               <div key={item.timeframe}><span>{item.timeframe}</span><strong className={`text-signal text-signal--${item.signal}`}>{signalLabel(item.signal)}</strong><small>RSI {item.rsi14.toFixed(1)} · ATR {item.atr14.toFixed(instrument === "EURUSD" ? 5 : 1)}</small></div>
             ))}
           </div>
-          {analysis.macro_context && (
-            <div className={`macro-context macro-context--${analysis.macro_context.risk_level.toLowerCase()} ${analysis.macro_context.blocks_trade ? "macro-context--blocked" : ""}`}>
-              <div className="macro-context__heading">
-                <CalendarDays size={20} />
-                <div><span>Makroekonomický filtr</span><strong>{macroRiskLabel(analysis.macro_context.risk_level)}</strong></div>
-                <em>{analysis.macro_context.status === "ACTIVE" ? "FMP aktivní" : analysis.macro_context.status === "ERROR" ? "Zdroj nedostupný" : "Čeká na API klíč"}</em>
-              </div>
-              <p>{analysis.macro_context.applied_rule}</p>
-              {analysis.macro_context.nearest_event && (
-                <div className="macro-event">
-                  <div><span>{analysis.macro_context.nearest_event.currency || analysis.macro_context.nearest_event.country} · {analysis.macro_context.nearest_event.impact}</span><strong>{analysis.macro_context.nearest_event.event}</strong><small>{formatPragueTime(analysis.macro_context.nearest_event.date)} · {relativeMacroTime(analysis.macro_context.nearest_event.minutes_from_analysis)}</small></div>
-                  <dl>
-                    <div><dt>Předchozí</dt><dd>{macroNumber(analysis.macro_context.nearest_event.previous, analysis.macro_context.nearest_event.unit)}</dd></div>
-                    <div><dt>Očekávání</dt><dd>{macroNumber(analysis.macro_context.nearest_event.estimate, analysis.macro_context.nearest_event.unit)}</dd></div>
-                    <div><dt>Výsledek</dt><dd>{macroNumber(analysis.macro_context.nearest_event.actual, analysis.macro_context.nearest_event.unit)}</dd></div>
-                  </dl>
-                </div>
-              )}
-              {analysis.macro_context.status === "UNAVAILABLE" && <small className="macro-context__notice">Pro automatické zohlednění událostí je potřeba na Vercelu nastavit bezplatný serverový klíč FMP_API_KEY.</small>}
-              {analysis.macro_context.blocks_trade && analysis.macro_context.reanalysis_at && <small className="macro-context__notice">Nová analýza nejdříve: <b>{formatPragueTime(analysis.macro_context.reanalysis_at)}</b></small>}
-            </div>
-          )}
           <div className="market-read"><BarChart3 size={20} /><p>{analysis.market_read}</p></div>
 
           <div className="result-grid">
